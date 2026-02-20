@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}SNS Tech Briefing{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <style>
+        body { font-family: -apple-system, 'Malgun Gothic', 'Noto Sans KR', sans-serif; }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <!-- 네비게이션 -->
+    <nav class="bg-gray-900 text-white shadow-lg">
+        <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+            <a href="/" class="text-xl font-bold">SNS Tech Briefing</a>
+            <div class="flex gap-6 text-sm">
+                <a href="/" class="hover:text-blue-300">대시보드</a>
+                <a href="/briefings" class="hover:text-blue-300">브리핑 아카이브</a>
+                <a href="/posts" class="hover:text-blue-300">게시물 탐색</a>
+                <a href="/status" class="hover:text-blue-300">시스템 상태</a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- 메인 콘텐츠 -->
+    <main class="max-w-7xl mx-auto px-4 py-6">
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer class="text-center text-gray-400 text-xs py-4">
+        SNS Tech Briefing System v0.1.0
+    </footer>
+</body>
+</html>

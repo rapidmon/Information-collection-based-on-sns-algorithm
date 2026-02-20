@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}브리핑 아카이브{% endblock %}
+
+{% block content %}
+<h1 class="text-2xl font-bold mb-6">브리핑 아카이브</h1>
+
+<div class="space-y-4">
+    {% for b in briefings %}
+    <a href="/briefings/{{ b.id }}" class="block bg-white rounded-lg shadow p-5 hover:shadow-md transition-shadow">
+        <div class="flex justify-between items-center">
+            <div>
+                <h2 class="font-bold text-lg">{{ b.title }}</h2>
+                <div class="text-sm text-gray-500 mt-1">
+                    {{ b.period_start.strftime('%Y-%m-%d %H:%M') if b.period_start else '' }} ~
+                    {{ b.period_end.strftime('%Y-%m-%d %H:%M') if b.period_end else '' }}
+                </div>
+            </div>
+            <div class="text-right">
+                <div class="text-2xl font-bold text-blue-600">{{ b.total_items or 0 }}</div>
+                <div class="text-xs text-gray-400">항목</div>
+            </div>
+        </div>
+        <div class="flex gap-4 mt-3 text-xs text-gray-400">
+            <span>분석: {{ b.total_posts_analyzed or 0 }}건</span>
+            {% if b.email_sent %}
+            <span class="text-green-500">이메일 전송됨</span>
+            {% endif %}
+        </div>
+    </a>
+    {% endfor %}
+
+    {% if not briefings %}
+    <div class="bg-white rounded-lg shadow p-8 text-center text-gray-400">
+        아직 생성된 브리핑이 없습니다.
+    </div>
+    {% endif %}
+</div>
+
+<!-- 페이지네이션 -->
+<div class="flex justify-center gap-4 mt-8">
+    {% if page > 1 %}
+    <a href="/briefings?page={{ page - 1 }}" class="px-4 py-2 bg-white rounded shadow hover:bg-gray-50">← 이전</a>
+    {% endif %}
+    <span class="px-4 py-2 text-gray-500">{{ page }} 페이지</span>
+    {% if briefings|length >= 20 %}
+    <a href="/briefings?page={{ page + 1 }}" class="px-4 py-2 bg-white rounded shadow hover:bg-gray-50">다음 →</a>
+    {% endif %}
+</div>
+{% endblock %}

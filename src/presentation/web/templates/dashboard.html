@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}대시보드 - SNS Tech Briefing{% endblock %}
+
+{% block content %}
+<!-- 수집 통계 카드 -->
+<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+    {% for source, count in (source_counts or {}).items() %}
+    <div class="bg-white rounded-lg shadow p-4">
+        <div class="text-sm text-gray-500 uppercase">{{ source }}</div>
+        <div class="text-2xl font-bold mt-1">{{ count }}</div>
+        <div class="text-xs text-gray-400">최근 24시간</div>
+    </div>
+    {% endfor %}
+    {% if not source_counts %}
+    <div class="bg-white rounded-lg shadow p-4 col-span-4 text-center text-gray-400">
+        아직 수집된 데이터가 없습니다.
+    </div>
+    {% endif %}
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <!-- 최신 브리핑 (2/3 너비) -->
+    <div class="lg:col-span-2">
+        <div class="bg-white rounded-lg shadow">
+            <div class="bg-gray-900 text-white px-6 py-4 rounded-t-lg flex justify-between items-center">
+                <h2 class="text-lg font-bold">
+                    {% if briefing %}{{ briefing.title }}{% else %}최신 브리핑{% endif %}
+                </h2>
+                <button
+                    hx-post="/api/briefing/generate"
+                    hx-swap="none"
+                    class="text-xs bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded"
+                    onclick="alert('브리핑 생성을 시작합니다. 잠시 후 새로고침해주세요.')"
+                >
+                    수동 생성
+                </button>
+            </div>
+            <div class="p-6">
+                {% if briefing and briefing.content_html %}
+                    {{ briefing.content_html | safe }}
+                {% elif briefing and briefing.content_text %}
+                    <pre class="whitespace-pre-wrap text-sm">{{ briefing.content_text }}</pre>
+                {% else %}
+                    <p class="text-gray-400 text-center py-8">아직 생성된 브리핑이 없습니다.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- 사이드바 (1/3 너비) -->
+    <div class="space-y-6">
+        <!-- 최근 수집 현황 -->
+        <div class="bg-white rounded-lg shadow p-4">
+            <h3 class="font-bold text-gray-700 mb-3">최근 수집 현황</h3>
+            {% for run in (runs or [])[:8] %}
+            <div class="flex justify-between items-center py-2 border-b border-gray-100 text-sm">
+                <div>
+                    <span class="font-medium">{{ run.source }}</span>
+                    <span class="text-gray-400 text-xs ml-1">
+                        {% if run.started_at %}{{ run.started_at.strftime('%H:%M') }}{% endif %}
+                    </span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span class="text-gray-600">{{ run.posts_collected or 0 }}건</span>
+                    {% if run.status == 'success' %}
+                    <span class="w-2 h-2 bg-green-500 rounded-full"></span>
+                    {% elif run.status == 'failed' %}
+                    <span class="w-2 h-2 bg-red-500 rounded-full"></span>
+                    {% else %}
+                    <span class="w-2 h-2 bg-yellow-500 rounded-full"></span>
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+            {% if not runs %}
+            <p class="text-gray-400 text-sm text-center py-4">수집 기록 없음</p>
+            {% endif %}
+        </div>
+
+        <!-- 수동 수집 트리거 -->
+        <div class="bg-white rounded-lg shadow p-4">
+            <h3 class="font-bold text-gray-700 mb-3">수동 수집</h3>
+            <div class="grid grid-cols-2 gap-2">
+                {% for source in ['twitter', 'threads', 'linkedin', 'dcinside'] %}
+                <button
+                    hx-post="/api/collect/trigger/{{ source }}"
+                    hx-swap="none"
+                    class="bg-gray-100 hover:bg-gray-200 text-sm py-2 rounded text-center"
+                    onclick="this.textContent='수집중...';"
+                >
+                    {{ source }}
+                </button>
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- 최근 게시물 미리보기 -->
+        <div class="bg-white rounded-lg shadow p-4">
+            <h3 class="font-bold text-gray-700 mb-3">최근 수집 게시물</h3>
+            {% for post in (posts or [])[:10] %}
+            <div class="py-2 border-b border-gray-100">
+                <div class="flex items-center gap-2 mb-1">
+                    <span class="text-xs px-1.5 py-0.5 bg-gray-100 rounded text-gray-600">{{ post.source }}</span>
+                    <span class="text-xs text-gray-400">{{ post.author[:20] }}</span>
+                </div>
+                <a href="{{ post.url }}" target="_blank" class="text-sm text-gray-700 hover:text-blue-600 line-clamp-2">
+                    {{ post.content_text[:100] }}
+                </a>
+            </div>
+            {% endfor %}
+            {% if not posts %}
+            <p class="text-gray-400 text-sm text-center py-4">게시물 없음</p>
+            {% endif %}
+            <a href="/posts" class="block text-center text-sm text-blue-500 hover:text-blue-700 mt-3">전체 보기 →</a>
+        </div>
+    </div>
+</div>
+{% endblock %}

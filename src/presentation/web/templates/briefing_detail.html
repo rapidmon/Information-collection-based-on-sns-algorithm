@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}{{ briefing.title if briefing else '브리핑' }}{% endblock %}
+
+{% block content %}
+<a href="/briefings" class="text-blue-500 hover:text-blue-700 text-sm">← 아카이브로 돌아가기</a>
+
+{% if briefing %}
+<div class="mt-4 bg-white rounded-lg shadow">
+    <div class="bg-gray-900 text-white px-6 py-4 rounded-t-lg">
+        <h1 class="text-xl font-bold">{{ briefing.title }}</h1>
+        <div class="text-sm text-gray-400 mt-1">
+            {{ briefing.period_start.strftime('%Y-%m-%d %H:%M') if briefing.period_start else '' }} ~
+            {{ briefing.period_end.strftime('%Y-%m-%d %H:%M') if briefing.period_end else '' }}
+            | 분석: {{ briefing.total_posts_analyzed or 0 }}건 → {{ briefing.total_items or 0 }}개 항목
+        </div>
+    </div>
+    <div class="p-6">
+        {% if briefing.content_html %}
+            {{ briefing.content_html | safe }}
+        {% elif briefing.content_text %}
+            <pre class="whitespace-pre-wrap text-sm leading-relaxed">{{ briefing.content_text }}</pre>
+        {% else %}
+            <p class="text-gray-400">콘텐츠 없음</p>
+        {% endif %}
+    </div>
+</div>
+{% else %}
+<div class="mt-4 bg-white rounded-lg shadow p-8 text-center text-gray-400">
+    브리핑을 찾을 수 없습니다.
+</div>
+{% endif %}
+{% endblock %}

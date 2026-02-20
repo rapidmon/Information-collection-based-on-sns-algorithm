@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}게시물 탐색{% endblock %}
+
+{% block content %}
+<h1 class="text-2xl font-bold mb-4">게시물 탐색</h1>
+
+<!-- 필터 바 -->
+<div class="bg-white rounded-lg shadow p-4 mb-6">
+    <form method="get" action="/posts" class="flex flex-wrap gap-3 items-end">
+        <!-- 검색 -->
+        <div class="flex-1 min-w-[200px]">
+            <label class="text-xs text-gray-500 block mb-1">검색</label>
+            <input type="text" name="q" value="{{ current_query or '' }}"
+                   placeholder="키워드 검색..."
+                   class="w-full border rounded px-3 py-2 text-sm">
+        </div>
+
+        <!-- 소스 필터 -->
+        <div>
+            <label class="text-xs text-gray-500 block mb-1">소스</label>
+            <select name="source" class="border rounded px-3 py-2 text-sm">
+                <option value="">전체</option>
+                {% for s in ['twitter', 'threads', 'linkedin', 'dcinside'] %}
+                <option value="{{ s }}" {% if current_source == s %}selected{% endif %}>{{ s }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <!-- 카테고리 필터 -->
+        <div>
+            <label class="text-xs text-gray-500 block mb-1">카테고리</label>
+            <select name="category" class="border rounded px-3 py-2 text-sm">
+                <option value="">전체</option>
+                {% for cat in categories %}
+                <option value="{{ cat.name }}" {% if current_category == cat.name %}selected{% endif %}>
+                    {{ cat.name_ko }} ({{ cat.name }})
+                </option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700">
+            검색
+        </button>
+        <a href="/posts" class="text-gray-400 text-sm hover:text-gray-600 py-2">초기화</a>
+    </form>
+</div>
+
+<!-- 게시물 목록 -->
+<div class="space-y-3">
+    {% for post in posts %}
+    <div class="bg-white rounded-lg shadow p-4">
+        <div class="flex items-center gap-2 mb-2">
+            <span class="text-xs px-2 py-0.5 rounded
+                {% if post.source == 'twitter' %}bg-blue-100 text-blue-700
+                {% elif post.source == 'threads' %}bg-purple-100 text-purple-700
+                {% elif post.source == 'linkedin' %}bg-sky-100 text-sky-700
+                {% else %}bg-gray-100 text-gray-700{% endif %}
+            ">{{ post.source }}</span>
+            <span class="text-sm font-medium">{{ post.author[:30] }}</span>
+            {% if post.importance_score %}
+            <span class="text-xs text-yellow-600">
+                {% if post.importance_score >= 0.9 %}★★★★★
+                {% elif post.importance_score >= 0.7 %}★★★★☆
+                {% elif post.importance_score >= 0.5 %}★★★☆☆
+                {% else %}★★☆☆☆{% endif %}
+            </span>
+            {% endif %}
+            <span class="text-xs text-gray-400 ml-auto">
+                {% if post.collected_at %}{{ post.collected_at.strftime('%m-%d %H:%M') }}{% endif %}
+            </span>
+        </div>
+
+        {% if post.summary %}
+        <p class="text-sm text-gray-800 mb-1">{{ post.summary }}</p>
+        <details class="text-xs text-gray-500">
+            <summary class="cursor-pointer hover:text-gray-700">원문 보기</summary>
+            <p class="mt-1 whitespace-pre-wrap">{{ post.content_text[:500] }}</p>
+        </details>
+        {% else %}
+        <p class="text-sm text-gray-700">{{ post.content_text[:300] }}</p>
+        {% endif %}
+
+        {% if post.category_names %}
+        <div class="flex gap-1 mt-2">
+            {% for cat in post.category_names %}
+            <span class="text-xs px-1.5 py-0.5 bg-gray-100 rounded text-gray-600">{{ cat }}</span>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        {% if post.url %}
+        <a href="{{ post.url }}" target="_blank" class="text-xs text-blue-500 hover:text-blue-700 mt-2 inline-block">
+            원문 링크 →
+        </a>
+        {% endif %}
+    </div>
+    {% endfor %}
+
+    {% if not posts %}
+    <div class="bg-white rounded-lg shadow p-8 text-center text-gray-400">
+        조건에 맞는 게시물이 없습니다.
+    </div>
+    {% endif %}
+</div>
+
+<!-- 페이지네이션 -->
+<div class="flex justify-center gap-4 mt-8">
+    {% if page > 1 %}
+    <a href="/posts?page={{ page - 1 }}&q={{ current_query or '' }}&source={{ current_source or '' }}&category={{ current_category or '' }}"
+       class="px-4 py-2 bg-white rounded shadow hover:bg-gray-50">← 이전</a>
+    {% endif %}
+    {% if posts|length >= 50 %}
+    <a href="/posts?page={{ page + 1 }}&q={{ current_query or '' }}&source={{ current_source or '' }}&category={{ current_category or '' }}"
+       class="px-4 py-2 bg-white rounded shadow hover:bg-gray-50">다음 →</a>
+    {% endif %}
+</div>
+{% endblock %}

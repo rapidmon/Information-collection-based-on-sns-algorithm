@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}시스템 상태{% endblock %}
+
+{% block content %}
+<h1 class="text-2xl font-bold mb-6">시스템 상태</h1>
+
+<!-- 소스별 마지막 성공 -->
+<div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+    {% for source in collectors %}
+    <div class="bg-white rounded-lg shadow p-4">
+        <div class="text-sm font-bold text-gray-700 uppercase mb-2">{{ source }}</div>
+        {% set run = last_success.get(source) %}
+        {% if run %}
+        <div class="text-green-600 text-sm">마지막 성공</div>
+        <div class="text-lg font-bold">
+            {{ run.completed_at.strftime('%H:%M') if run.completed_at else 'N/A' }}
+        </div>
+        <div class="text-xs text-gray-400">
+            {{ run.completed_at.strftime('%Y-%m-%d') if run.completed_at else '' }}
+            | {{ run.posts_collected or 0 }}건
+        </div>
+        {% else %}
+        <div class="text-yellow-600 text-sm">수집 기록 없음</div>
+        <div class="text-xs text-gray-400 mt-2">수동 수집을 실행하세요</div>
+        {% endif %}
+    </div>
+    {% endfor %}
+</div>
+
+<!-- 최근 수집 로그 -->
+<div class="bg-white rounded-lg shadow">
+    <div class="px-6 py-4 border-b">
+        <h2 class="font-bold text-lg">수집 실행 로그</h2>
+    </div>
+    <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+            <thead class="bg-gray-50 text-gray-500 text-xs uppercase">
+                <tr>
+                    <th class="px-4 py-3 text-left">소스</th>
+                    <th class="px-4 py-3 text-left">시작</th>
+                    <th class="px-4 py-3 text-left">완료</th>
+                    <th class="px-4 py-3 text-left">상태</th>
+                    <th class="px-4 py-3 text-right">수집 건수</th>
+                    <th class="px-4 py-3 text-left">오류</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for run in runs %}
+                <tr class="border-b hover:bg-gray-50">
+                    <td class="px-4 py-3 font-medium">{{ run.source }}</td>
+                    <td class="px-4 py-3 text-gray-500">
+                        {{ run.started_at.strftime('%m-%d %H:%M:%S') if run.started_at else '' }}
+                    </td>
+                    <td class="px-4 py-3 text-gray-500">
+                        {{ run.completed_at.strftime('%H:%M:%S') if run.completed_at else '-' }}
+                    </td>
+                    <td class="px-4 py-3">
+                        {% if run.status == 'success' %}
+                        <span class="px-2 py-0.5 bg-green-100 text-green-700 rounded text-xs">성공</span>
+                        {% elif run.status == 'failed' %}
+                        <span class="px-2 py-0.5 bg-red-100 text-red-700 rounded text-xs">실패</span>
+                        {% else %}
+                        <span class="px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded text-xs">{{ run.status }}</span>
+                        {% endif %}
+                    </td>
+                    <td class="px-4 py-3 text-right">{{ run.posts_collected or 0 }}</td>
+                    <td class="px-4 py-3 text-red-500 text-xs">{{ run.error_message[:60] if run.error_message else '' }}</td>
+                </tr>
+                {% endfor %}
+                {% if not runs %}
+                <tr>
+                    <td colspan="6" class="px-4 py-8 text-center text-gray-400">수집 기록이 없습니다.</td>
+                </tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
