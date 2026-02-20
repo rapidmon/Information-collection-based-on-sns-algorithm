@@ -11,17 +11,15 @@ import random
 from datetime import datetime
 from typing import Optional
 
-from playwright.async_api import async_playwright
-
 from src.domain.entities import Post
 from src.domain.exceptions import SessionExpiredError
-from src.infrastructure.collectors.base import BaseCollector
+from src.infrastructure.collectors.cdp import cdp_connection, check_session
 from src.infrastructure.config.settings import CollectorConfig
 
 logger = logging.getLogger(__name__)
 
 
-class LinkedInCollector(BaseCollector):
+class LinkedInCollector:
     """LinkedIn 알고리즘 피드 수집기 (CDP 기반)."""
 
     FEED_URL = "https://www.linkedin.com/feed/"
@@ -35,80 +33,57 @@ class LinkedInCollector(BaseCollector):
         return "linkedin"
 
     async def is_session_valid(self) -> bool:
-        try:
-            pw = await async_playwright().start()
-            try:
-                browser = await pw.chromium.connect_over_cdp(self._cdp_url)
-                context = browser.contexts[0]
-                page = await context.new_page()
-                try:
-                    await page.goto(self.FEED_URL, wait_until="domcontentloaded", timeout=15000)
-                    url = page.url
-                    return "login" not in url and "authwall" not in url and "checkpoint" not in url
-                finally:
-                    await page.close()
-            finally:
-                await pw.stop()
-        except Exception as e:
-            logger.warning(f"[linkedin] 세션 확인 실패: {e}")
-            return False
+        return await check_session(
+            self._cdp_url, "linkedin", self.FEED_URL,
+            ["login", "authwall", "checkpoint"],
+        )
 
     async def collect(self) -> list[Post]:
         """DOM 파싱으로 LinkedIn 피드를 수집."""
-        pw = await async_playwright().start()
+        async with cdp_connection(self._cdp_url, "linkedin") as (pw, context):
+            page = await context.new_page()
 
-        try:
-            browser = await pw.chromium.connect_over_cdp(self._cdp_url)
-        except Exception as e:
-            await pw.stop()
-            logger.error(f"[linkedin] Chrome 연결 실패: {e}")
-            raise
+            try:
+                await page.goto(self.FEED_URL, wait_until="domcontentloaded", timeout=60000)
 
-        context = browser.contexts[0]
-        page = await context.new_page()
+                if any(kw in page.url for kw in ["login", "authwall", "checkpoint", "security"]):
+                    raise SessionExpiredError("linkedin — Chrome에서 LinkedIn에 로그인 해주세요")
 
-        try:
-            await page.goto(self.FEED_URL, wait_until="domcontentloaded", timeout=60000)
+                await asyncio.sleep(random.uniform(2.0, 4.0))
+                await page.mouse.move(random.randint(100, 800), random.randint(100, 600))
 
-            if any(kw in page.url for kw in ["login", "authwall", "checkpoint", "security"]):
-                raise SessionExpiredError("linkedin — Chrome에서 LinkedIn에 로그인 해주세요")
+                posts: list[Post] = []
+                seen_ids: set[str] = set()
 
-            await asyncio.sleep(random.uniform(2.0, 4.0))
-            await page.mouse.move(random.randint(100, 800), random.randint(100, 600))
+                for round_num in range(self._config.scroll_rounds):
+                    updates = await page.query_selector_all(".feed-shared-update-v2")
+                    if not updates:
+                        updates = await page.query_selector_all(
+                            'div[data-urn*="urn:li:activity"]'
+                        )
 
-            posts: list[Post] = []
-            seen_ids: set[str] = set()
+                    for update in updates:
+                        post = await self._parse_feed_update(update)
+                        if post and post.external_id not in seen_ids:
+                            seen_ids.add(post.external_id)
+                            posts.append(post)
 
-            for round_num in range(self._config.scroll_rounds):
-                updates = await page.query_selector_all(".feed-shared-update-v2")
-                if not updates:
-                    updates = await page.query_selector_all(
-                        'div[data-urn*="urn:li:activity"]'
+                    scroll_amount = random.randint(800, 1500)
+                    await page.evaluate(f"window.scrollBy(0, {scroll_amount})")
+                    await asyncio.sleep(
+                        random.uniform(self._config.scroll_delay_min, self._config.scroll_delay_max)
                     )
 
-                for update in updates:
-                    post = await self._parse_feed_update(update)
-                    if post and post.external_id not in seen_ids:
-                        seen_ids.add(post.external_id)
-                        posts.append(post)
+                    if round_num % 2 == 0:
+                        await page.mouse.move(
+                            random.randint(100, 800), random.randint(100, 600)
+                        )
 
-                scroll_amount = random.randint(800, 1500)
-                await page.evaluate(f"window.scrollBy(0, {scroll_amount})")
-                await asyncio.sleep(
-                    random.uniform(self._config.scroll_delay_min, self._config.scroll_delay_max)
-                )
+                logger.info(f"[linkedin] {len(posts)}건 수집 완료")
+                return posts
 
-                if round_num % 2 == 0:
-                    await page.mouse.move(
-                        random.randint(100, 800), random.randint(100, 600)
-                    )
-
-            logger.info(f"[linkedin] {len(posts)}건 수집 완료")
-            return posts
-
-        finally:
-            await page.close()
-            await pw.stop()
+            finally:
+                await page.close()
 
     async def _parse_feed_update(self, element) -> Optional[Post]:
         try:

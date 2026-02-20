@@ -9,15 +9,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
-import re
 from datetime import datetime
 from typing import Optional
 
 from bs4 import BeautifulSoup, Tag
-from playwright.async_api import async_playwright
 
 from src.domain.entities import Post
-from src.infrastructure.collectors.base import BaseCollector
+from src.infrastructure.collectors.cdp import cdp_connection
 from src.infrastructure.config.settings import CollectorConfig
 
 logger = logging.getLogger(__name__)
@@ -28,7 +26,7 @@ _RECOMMEND_URL_DESKTOP = (
 )
 
 
-class DCInsideCollector(BaseCollector):
+class DCInsideCollector:
     """DCInside 마이너 갤러리 개념글 수집기 (CDP 기반)."""
 
     def __init__(self, config: CollectorConfig, cdp_port: int = 9222):
@@ -41,22 +39,15 @@ class DCInsideCollector(BaseCollector):
     def source_name(self) -> str:
         return "dcinside"
 
+    async def is_session_valid(self) -> bool:
+        return True
+
     async def collect(self) -> list[Post]:
         """개념글 탭에서 목록을 읽고, 각 게시물 상세에서 본문 수집."""
-        pw = await async_playwright().start()
+        async with cdp_connection(self._cdp_url, "dcinside") as (pw, context):
+            posts: list[Post] = []
+            seen_ids: set[str] = set()
 
-        try:
-            browser = await pw.chromium.connect_over_cdp(self._cdp_url)
-        except Exception as e:
-            await pw.stop()
-            logger.error(f"[dcinside] Chrome 연결 실패: {e}")
-            raise
-
-        context = browser.contexts[0]
-        posts: list[Post] = []
-        seen_ids: set[str] = set()
-
-        try:
             # 이미 열려있는 개념글 탭 찾기
             page = self._find_gallery_tab(context)
 
@@ -64,7 +55,6 @@ class DCInsideCollector(BaseCollector):
                 logger.info(f"[dcinside] 기존 탭 발견: {page.url}")
                 await page.reload(wait_until="domcontentloaded", timeout=30000)
             else:
-                # 탭이 없으면 새로 열기
                 recommend_url = _RECOMMEND_URL_DESKTOP.format(gallery_id=self._gallery_id)
                 page = await context.new_page()
                 await page.goto(recommend_url, wait_until="domcontentloaded", timeout=30000)
@@ -100,11 +90,7 @@ class DCInsideCollector(BaseCollector):
                 pass
 
             logger.info(f"[dcinside] 총 {len(posts)}건 수집 완료")
-
-        finally:
-            await pw.stop()
-
-        return posts
+            return posts
 
     def _find_gallery_tab(self, context) -> Optional[object]:
         """이미 열려있는 DCInside 갤러리 탭을 찾는다."""
@@ -119,10 +105,7 @@ class DCInsideCollector(BaseCollector):
         soup = BeautifulSoup(html, "lxml")
         posts: list[Post] = []
 
-        # 데스크톱: tr.ub-content (갤러리 게시물 행)
-        rows = soup.select("tr.ub-content")
-
-        for row in rows:
+        for row in soup.select("tr.ub-content"):
             try:
                 post = self._parse_desktop_row(row, seen_ids)
                 if post:
@@ -134,14 +117,12 @@ class DCInsideCollector(BaseCollector):
 
     def _parse_desktop_row(self, row: Tag, seen_ids: set[str]) -> Optional[Post]:
         """데스크톱 테이블 행에서 게시물 정보 추출."""
-        # 공지/광고 제외
         gall_num = row.select_one("td.gall_num")
         if gall_num:
             num_text = gall_num.get_text(strip=True)
             if num_text in ("공지", "설문", "AD", "뉴스"):
                 return None
 
-        # 게시물 번호
         post_no = row.get("data-no", "")
         if not post_no:
             if gall_num:
@@ -156,7 +137,6 @@ class DCInsideCollector(BaseCollector):
             return None
         seen_ids.add(external_id)
 
-        # 제목
         title_td = row.select_one("td.gall_tit")
         if not title_td:
             return None
@@ -171,7 +151,6 @@ class DCInsideCollector(BaseCollector):
         if not title:
             return None
 
-        # 작성자
         author = ""
         writer_td = row.select_one("td.gall_writer")
         if writer_td:
@@ -181,7 +160,6 @@ class DCInsideCollector(BaseCollector):
             else:
                 author = writer_td.get("data-nick", "")
 
-        # 댓글 수
         comment_count = 0
         reply_el = title_td.select_one(".reply_numbox .reply_num")
         if reply_el:
@@ -189,7 +167,6 @@ class DCInsideCollector(BaseCollector):
             if ct_text.isdigit():
                 comment_count = int(ct_text)
 
-        # 조회수
         views = 0
         count_td = row.select_one("td.gall_count")
         if count_td:

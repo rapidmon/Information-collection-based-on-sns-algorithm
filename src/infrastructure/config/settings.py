@@ -83,16 +83,6 @@ class WebConfig:
         self.auto_refresh_seconds: int = data.get("auto_refresh_seconds", 60)
 
 
-class BrowserConfig:
-    def __init__(self, data: dict[str, Any]):
-        self.headless: bool = data.get("headless", False)
-        self.profile_dir: str = data.get("profile_dir", "browser_data")
-        self.user_agents: list[str] = data.get("user_agents", [
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-        ])
-
-
 class AppConfig:
     """YAML에서 로드된 전체 앱 설정."""
 
@@ -113,7 +103,6 @@ class AppConfig:
         self.briefing = BriefingConfig(data.get("briefing", {}))
         self.email = EmailConfig(data.get("email", {}))
         self.web = WebConfig(data.get("web", {}))
-        self.browser = BrowserConfig(data.get("browser", {}))
 
 
 def load_app_config(path: str = "config/settings.yaml") -> AppConfig:

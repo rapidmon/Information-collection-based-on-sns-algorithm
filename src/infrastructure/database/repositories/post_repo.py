@@ -8,12 +8,9 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime
-from functools import partial
-from typing import Any
+from typing import Any, Callable
 
 from src.domain.entities import Post
-
-# ─── 도메인 엔티티 ↔ Firestore 문서 변환 ───
 
 
 def _post_to_dict(post: Post) -> dict[str, Any]:
@@ -46,7 +43,7 @@ def _post_to_dict(post: Post) -> dict[str, Any]:
 def _post_from_doc(doc) -> Post:
     d = doc.to_dict()
     return Post(
-        id=doc.id,  # Firestore 문서 ID를 id로 사용
+        id=doc.id,
         source=d.get("source", ""),
         external_id=d.get("external_id", ""),
         url=d.get("url", ""),
@@ -76,12 +73,27 @@ class FirestorePostRepository:
     """Firestore 기반 PostRepository 구현."""
 
     COLLECTION = "posts"
+    _BATCH_LIMIT = 400
 
     def __init__(self, db):
         self._db = db
 
     def _col(self):
         return self._db.collection(self.COLLECTION)
+
+    def _run_batch(self, items: list, operation: Callable) -> int:
+        """Firestore batch 작업을 400건 단위로 실행. operation(batch, item)을 호출."""
+        batch = self._db.batch()
+        count = 0
+        for item in items:
+            operation(batch, item)
+            count += 1
+            if count % self._BATCH_LIMIT == 0:
+                batch.commit()
+                batch = self._db.batch()
+        if count % self._BATCH_LIMIT != 0:
+            batch.commit()
+        return count
 
     async def save(self, post: Post) -> Post:
         def _save():
@@ -107,11 +119,10 @@ class FirestorePostRepository:
                     continue
                 batch.set(doc_ref, _post_to_dict(post))
                 saved += 1
-                # Firestore batch는 최대 500개
-                if saved % 400 == 0:
+                if saved % self._BATCH_LIMIT == 0:
                     batch.commit()
                     batch = self._db.batch()
-            if saved % 400 != 0:
+            if saved % self._BATCH_LIMIT != 0:
                 batch.commit()
             return saved
 
@@ -173,29 +184,17 @@ class FirestorePostRepository:
         return await asyncio.to_thread(_update)
 
     async def update_many(self, posts: list[Post]) -> int:
-        def _update_many():
-            batch = self._db.batch()
-            count = 0
-            for post in posts:
-                doc_id = post.id or post.external_id
-                if not doc_id:
-                    continue
-                doc_ref = self._col().document(doc_id)
-                batch.update(doc_ref, {
+        def _op(batch, post):
+            doc_id = post.id or post.external_id
+            if doc_id:
+                batch.update(self._col().document(doc_id), {
                     "summary": post.summary,
                     "importance_score": post.importance_score,
                     "language": post.language,
                     "is_relevant": post.is_relevant,
                 })
-                count += 1
-                if count % 400 == 0:
-                    batch.commit()
-                    batch = self._db.batch()
-            if count % 400 != 0:
-                batch.commit()
-            return count
 
-        return await asyncio.to_thread(_update_many)
+        return await asyncio.to_thread(self._run_batch, posts, _op)
 
     async def search(
         self,
@@ -211,7 +210,6 @@ class FirestorePostRepository:
         def _search():
             col = self._col()
 
-            # AI 처리 완료된 게시물만 (is_relevant == True)
             if relevant_only:
                 q = col.where("is_relevant", "==", True)
                 if source:
@@ -233,7 +231,6 @@ class FirestorePostRepository:
             docs = list(q.stream())
             posts = [_post_from_doc(d) for d in docs]
 
-            # Firestore는 텍스트 검색이 제한적이므로 클라이언트에서 필터링
             if query:
                 query_lower = query.lower()
                 posts = [
@@ -249,29 +246,17 @@ class FirestorePostRepository:
         return await asyncio.to_thread(_search)
 
     async def delete(self, post_id: str) -> None:
-        """게시물 삭제."""
         def _delete():
             self._col().document(post_id).delete()
         await asyncio.to_thread(_delete)
 
     async def delete_many(self, post_ids: list[str]) -> int:
-        """여러 게시물 일괄 삭제."""
-        def _delete_many():
-            batch = self._db.batch()
-            count = 0
-            for pid in post_ids:
-                batch.delete(self._col().document(pid))
-                count += 1
-                if count % 400 == 0:
-                    batch.commit()
-                    batch = self._db.batch()
-            if count % 400 != 0:
-                batch.commit()
-            return count
-        return await asyncio.to_thread(_delete_many)
+        def _op(batch, pid):
+            batch.delete(self._col().document(pid))
+
+        return await asyncio.to_thread(self._run_batch, post_ids, _op)
 
     async def get_unbriefed(self, limit: int = 500) -> list[Post]:
-        """브리핑에 포함되지 않은 관련 게시물 조회."""
         def _get():
             query = (
                 self._col()
@@ -284,20 +269,10 @@ class FirestorePostRepository:
         return await asyncio.to_thread(_get)
 
     async def mark_briefed(self, post_ids: list[str], briefed_at: datetime) -> int:
-        """게시물들을 브리핑 완료로 마킹."""
-        def _mark():
-            batch = self._db.batch()
-            count = 0
-            for pid in post_ids:
-                batch.update(self._col().document(pid), {"briefed_at": briefed_at})
-                count += 1
-                if count % 400 == 0:
-                    batch.commit()
-                    batch = self._db.batch()
-            if count % 400 != 0:
-                batch.commit()
-            return count
-        return await asyncio.to_thread(_mark)
+        def _op(batch, pid):
+            batch.update(self._col().document(pid), {"briefed_at": briefed_at})
+
+        return await asyncio.to_thread(self._run_batch, post_ids, _op)
 
     async def count_by_source(self, start: datetime, end: datetime) -> dict[str, int]:
         def _count():

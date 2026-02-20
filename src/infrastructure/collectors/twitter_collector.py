@@ -2,7 +2,6 @@
 
 사용자의 실행 중인 Chrome 브라우저에 CDP로 연결하여
 GraphQL 응답을 인터셉트하는 방식으로 타임라인을 수집한다.
-별도 로그인 불필요 — 사용자가 이미 로그인한 Chrome 세션을 그대로 사용.
 """
 
 from __future__ import annotations
@@ -13,17 +12,15 @@ import random
 from datetime import datetime
 from typing import Any, Optional
 
-from playwright.async_api import async_playwright
-
 from src.domain.entities import Post
 from src.domain.exceptions import SessionExpiredError
-from src.infrastructure.collectors.base import BaseCollector
+from src.infrastructure.collectors.cdp import cdp_connection, check_session
 from src.infrastructure.config.settings import CollectorConfig
 
 logger = logging.getLogger(__name__)
 
 
-class TwitterCollector(BaseCollector):
+class TwitterCollector:
     """X(Twitter) CDP 기반 수집기. 실행 중인 Chrome에 연결."""
 
     FEED_URL = "https://x.com/home"
@@ -38,74 +35,45 @@ class TwitterCollector(BaseCollector):
         return "twitter"
 
     async def is_session_valid(self) -> bool:
-        """CDP 연결 및 트위터 로그인 상태를 확인한다."""
-        try:
-            pw = await async_playwright().start()
-            try:
-                browser = await pw.chromium.connect_over_cdp(self._cdp_url)
-                context = browser.contexts[0]
-                page = await context.new_page()
-                try:
-                    await page.goto(self.FEED_URL, wait_until="domcontentloaded", timeout=15000)
-                    url = page.url
-                    return "login" not in url and "flow" not in url
-                finally:
-                    await page.close()
-            finally:
-                await pw.stop()
-        except Exception as e:
-            logger.warning(f"[twitter] 세션 확인 실패 (Chrome이 디버그 모드로 실행 중인지 확인): {e}")
-            return False
+        return await check_session(
+            self._cdp_url, "twitter", self.FEED_URL, ["login", "flow"]
+        )
 
     async def collect(self) -> list[Post]:
         """Chrome CDP로 연결하여 GraphQL 인터셉트 방식으로 타임라인을 수집한다."""
-        pw = await async_playwright().start()
+        async with cdp_connection(self._cdp_url, "twitter") as (pw, context):
+            page = await context.new_page()
+            captured: list[dict[str, Any]] = []
 
-        try:
-            browser = await pw.chromium.connect_over_cdp(self._cdp_url)
-        except Exception as e:
-            await pw.stop()
-            logger.error(
-                f"[twitter] Chrome 연결 실패. "
-                f"Chrome을 --remote-debugging-port=9222 로 실행했는지 확인하세요: {e}"
-            )
-            raise
+            async def on_response(response):
+                try:
+                    if any(p in response.url for p in self.TIMELINE_PATTERNS):
+                        if response.status == 200:
+                            data = await response.json()
+                            captured.append(data)
+                except Exception:
+                    pass
 
-        context = browser.contexts[0]
-        page = await context.new_page()
-        captured: list[dict[str, Any]] = []
+            page.on("response", on_response)
 
-        async def on_response(response):
             try:
-                if any(p in response.url for p in self.TIMELINE_PATTERNS):
-                    if response.status == 200:
-                        data = await response.json()
-                        captured.append(data)
-            except Exception:
-                pass
+                await page.goto(self.FEED_URL, wait_until="networkidle", timeout=30000)
 
-        page.on("response", on_response)
+                if "login" in page.url or "flow" in page.url:
+                    raise SessionExpiredError("twitter — Chrome에서 X에 로그인 해주세요")
 
-        try:
-            await page.goto(self.FEED_URL, wait_until="networkidle", timeout=30000)
+                for _ in range(self._config.scroll_rounds):
+                    await page.mouse.wheel(0, random.randint(800, 1500))
+                    await asyncio.sleep(
+                        random.uniform(self._config.scroll_delay_min, self._config.scroll_delay_max)
+                    )
 
-            if "login" in page.url or "flow" in page.url:
-                raise SessionExpiredError("twitter — Chrome에서 X에 로그인 해주세요")
+                posts = self._parse_graphql_responses(captured)
+                logger.info(f"[twitter] GraphQL 인터셉트: {len(posts)}건 수집")
+                return posts
 
-            # 스크롤하여 추가 데이터 로드
-            for _ in range(self._config.scroll_rounds):
-                await page.mouse.wheel(0, random.randint(800, 1500))
-                await asyncio.sleep(
-                    random.uniform(self._config.scroll_delay_min, self._config.scroll_delay_max)
-                )
-
-            posts = self._parse_graphql_responses(captured)
-            logger.info(f"[twitter] GraphQL 인터셉트: {len(posts)}건 수집")
-            return posts
-
-        finally:
-            await page.close()
-            await pw.stop()
+            finally:
+                await page.close()
 
     # ─── GraphQL 파싱 ───
 
@@ -136,17 +104,16 @@ class TwitterCollector(BaseCollector):
                 .get("instructions", [])
             )
             if not instructions:
-                for key in ["data"]:
-                    inner = data.get(key, {})
-                    for k, v in inner.items():
-                        if isinstance(v, dict) and "instructions" in v:
-                            instructions = v["instructions"]
-                            break
-                        if isinstance(v, dict):
-                            for k2, v2 in v.items():
-                                if isinstance(v2, dict) and "instructions" in v2:
-                                    instructions = v2["instructions"]
-                                    break
+                inner = data.get("data", {})
+                for k, v in inner.items():
+                    if isinstance(v, dict) and "instructions" in v:
+                        instructions = v["instructions"]
+                        break
+                    if isinstance(v, dict):
+                        for k2, v2 in v.items():
+                            if isinstance(v2, dict) and "instructions" in v2:
+                                instructions = v2["instructions"]
+                                break
 
             for instruction in instructions:
                 if instruction.get("type") == "TimelineAddEntries":

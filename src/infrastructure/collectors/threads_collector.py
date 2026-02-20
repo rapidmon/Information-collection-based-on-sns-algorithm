@@ -12,17 +12,15 @@ import random
 from datetime import datetime
 from typing import Any, Optional
 
-from playwright.async_api import async_playwright
-
 from src.domain.entities import Post
 from src.domain.exceptions import SessionExpiredError
-from src.infrastructure.collectors.base import BaseCollector
+from src.infrastructure.collectors.cdp import cdp_connection, check_session
 from src.infrastructure.config.settings import CollectorConfig
 
 logger = logging.getLogger(__name__)
 
 
-class ThreadsCollector(BaseCollector):
+class ThreadsCollector:
     """Threads 알고리즘 피드 수집기 (CDP 기반)."""
 
     FEED_URL = "https://www.threads.net/"
@@ -37,78 +35,55 @@ class ThreadsCollector(BaseCollector):
         return "threads"
 
     async def is_session_valid(self) -> bool:
-        try:
-            pw = await async_playwright().start()
-            try:
-                browser = await pw.chromium.connect_over_cdp(self._cdp_url)
-                context = browser.contexts[0]
-                page = await context.new_page()
-                try:
-                    await page.goto(self.FEED_URL, wait_until="domcontentloaded", timeout=15000)
-                    return "login" not in page.url
-                finally:
-                    await page.close()
-            finally:
-                await pw.stop()
-        except Exception as e:
-            logger.warning(f"[threads] 세션 확인 실패: {e}")
-            return False
+        return await check_session(
+            self._cdp_url, "threads", self.FEED_URL, ["login"]
+        )
 
     async def collect(self) -> list[Post]:
         """GraphQL 인터셉트 + DOM 파싱 하이브리드 방식으로 수집."""
-        pw = await async_playwright().start()
+        async with cdp_connection(self._cdp_url, "threads") as (pw, context):
+            page = await context.new_page()
+            captured_data: list[dict[str, Any]] = []
 
-        try:
-            browser = await pw.chromium.connect_over_cdp(self._cdp_url)
-        except Exception as e:
-            await pw.stop()
-            logger.error(f"[threads] Chrome 연결 실패: {e}")
-            raise
+            async def on_response(response):
+                try:
+                    url = response.url
+                    if any(p in url for p in self.GRAPHQL_PATTERNS) and response.status == 200:
+                        content_type = response.headers.get("content-type", "")
+                        if "json" in content_type or "application" in content_type:
+                            data = await response.json()
+                            captured_data.append(data)
+                except Exception:
+                    pass
 
-        context = browser.contexts[0]
-        page = await context.new_page()
-        captured_data: list[dict[str, Any]] = []
+            page.on("response", on_response)
 
-        async def on_response(response):
             try:
-                url = response.url
-                if any(p in url for p in self.GRAPHQL_PATTERNS) and response.status == 200:
-                    content_type = response.headers.get("content-type", "")
-                    if "json" in content_type or "application" in content_type:
-                        data = await response.json()
-                        captured_data.append(data)
-            except Exception:
-                pass
+                await page.goto(self.FEED_URL, wait_until="networkidle", timeout=30000)
 
-        page.on("response", on_response)
+                if "login" in page.url:
+                    raise SessionExpiredError("threads — Chrome에서 Threads에 로그인 해주세요")
 
-        try:
-            await page.goto(self.FEED_URL, wait_until="networkidle", timeout=30000)
+                for _ in range(self._config.scroll_rounds):
+                    await page.mouse.wheel(0, random.randint(600, 1200))
+                    await asyncio.sleep(
+                        random.uniform(self._config.scroll_delay_min, self._config.scroll_delay_max)
+                    )
 
-            if "login" in page.url:
-                raise SessionExpiredError("threads — Chrome에서 Threads에 로그인 해주세요")
+                posts = self._parse_graphql_data(captured_data)
 
-            for _ in range(self._config.scroll_rounds):
-                await page.mouse.wheel(0, random.randint(600, 1200))
-                await asyncio.sleep(
-                    random.uniform(self._config.scroll_delay_min, self._config.scroll_delay_max)
-                )
+                if len(posts) < 5:
+                    dom_posts = await self._collect_via_dom(page)
+                    existing_ids = {p.external_id for p in posts}
+                    for dp in dom_posts:
+                        if dp.external_id not in existing_ids:
+                            posts.append(dp)
 
-            posts = self._parse_graphql_data(captured_data)
+                logger.info(f"[threads] {len(posts)}건 수집 완료")
+                return posts
 
-            if len(posts) < 5:
-                dom_posts = await self._collect_via_dom(page)
-                existing_ids = {p.external_id for p in posts}
-                for dp in dom_posts:
-                    if dp.external_id not in existing_ids:
-                        posts.append(dp)
-
-            logger.info(f"[threads] {len(posts)}건 수집 완료")
-            return posts
-
-        finally:
-            await page.close()
-            await pw.stop()
+            finally:
+                await page.close()
 
     # ─── GraphQL 파싱 ───
 
