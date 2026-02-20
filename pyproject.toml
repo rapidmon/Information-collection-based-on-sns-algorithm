@@ -1,0 +1,9 @@
+[project]
+name = "sns-tech-briefing"
+version = "0.1.0"
+description = "SNS 알고리즘 기반 기술 정보 수집 & 브리핑 시스템"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

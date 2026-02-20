@@ -1,0 +1,86 @@
+app:
+  name: "SNS Tech Briefing"
+  timezone: "Asia/Seoul"
+
+collection:
+  twitter:
+    enabled: true
+    interval_minutes: 10
+    scroll_rounds: 8
+    scroll_delay_min: 2.0
+    scroll_delay_max: 4.0
+    use_graphql_interception: true
+  threads:
+    enabled: true
+    interval_minutes: 10
+    scroll_rounds: 6
+    scroll_delay_min: 2.5
+    scroll_delay_max: 5.0
+  linkedin:
+    enabled: true
+    interval_minutes: 60
+    scroll_rounds: 4
+    scroll_delay_min: 3.0
+    scroll_delay_max: 7.0
+  dcinside:
+    enabled: true
+    interval_minutes: 180
+    gallery_id: "thesingularity"
+    gallery_type: "mgallery"
+    pages_to_scrape: 3
+    request_delay_min: 1.5
+    request_delay_max: 3.0
+
+categories:
+  - name: "AI"
+    name_ko: "AI"
+    color: "#4A90D9"
+    keywords: ["AI", "인공지능", "LLM", "GPT", "Claude", "Gemini", "딥러닝", "머신러닝", "OpenAI", "Anthropic", "생성AI"]
+  - name: "Semiconductor"
+    name_ko: "반도체"
+    color: "#E74C3C"
+    keywords: ["반도체", "semiconductor", "칩", "chip", "TSMC", "삼성파운드리", "HBM", "GPU", "NVIDIA", "AMD", "Intel", "파운드리"]
+  - name: "Cloud"
+    name_ko: "클라우드"
+    color: "#2ECC71"
+    keywords: ["클라우드", "cloud", "AWS", "Azure", "GCP", "데이터센터", "SaaS", "IaaS"]
+  - name: "Startup"
+    name_ko: "스타트업"
+    color: "#F39C12"
+    keywords: ["스타트업", "startup", "투자", "펀딩", "시리즈", "인수", "합병", "M&A", "벤처"]
+  - name: "BigTech"
+    name_ko: "빅테크"
+    color: "#9B59B6"
+    keywords: ["Google", "Apple", "Meta", "Amazon", "Microsoft", "ByteDance", "Tencent", "빅테크"]
+  - name: "Regulation"
+    name_ko: "규제/정책"
+    color: "#1ABC9C"
+    keywords: ["규제", "정책", "법률", "regulation", "정부", "EU", "AI법", "독점"]
+
+processing:
+  model_filter: "gpt-4o-mini"
+  model_process: "gpt-4o"
+  batch_size_filter: 20
+  batch_size_summarize: 15
+  batch_size_categorize: 20
+  use_batch_api: true
+  min_importance_for_briefing: 0.4
+
+briefing:
+  daily_time: "06:30"
+  max_items: 20
+  include_stats: true
+
+email:
+  enabled: true
+  to_addresses:
+    - "user@example.com"
+
+web:
+  host: "0.0.0.0"
+  port: 8000
+  auto_refresh_seconds: 60
+
+browser:
+  headless: false
+  profile_dir: "browser_data"
