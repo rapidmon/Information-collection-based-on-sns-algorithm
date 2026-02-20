@@ -57,7 +57,8 @@ class TwitterCollector:
             page.on("response", on_response)
 
             try:
-                await page.goto(self.FEED_URL, wait_until="networkidle", timeout=30000)
+                await page.goto(self.FEED_URL, wait_until="domcontentloaded", timeout=60000)
+                await page.wait_for_timeout(3000)  # 타임라인 API 응답 대기
 
                 if "login" in page.url or "flow" in page.url:
                     raise SessionExpiredError("twitter — Chrome에서 X에 로그인 해주세요")
