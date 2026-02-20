@@ -19,7 +19,7 @@ collection:
   linkedin:
     enabled: true
     interval_minutes: 60
-    scroll_rounds: 4
+    scroll_rounds: 8
     scroll_delay_min: 3.0
     scroll_delay_max: 7.0
   dcinside:
@@ -56,6 +56,10 @@ categories:
     name_ko: "규제/정책"
     color: "#1ABC9C"
     keywords: ["규제", "정책", "법률", "regulation", "정부", "EU", "AI법", "독점"]
+  - name: "Coding"
+    name_ko: "코딩"
+    color: "#E67E22"
+    keywords: ["코딩", "프로그래밍", "개발자", "GitHub", "오픈소스", "Python", "JavaScript", "React", "프레임워크", "API", "DevOps", "CI/CD"]
 
 processing:
   model_filter: "gpt-4o-mini"
