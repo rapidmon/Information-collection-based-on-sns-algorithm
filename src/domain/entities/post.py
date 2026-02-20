@@ -35,6 +35,9 @@ class Post:
     is_relevant: Optional[bool] = None
     category_names: list[str] = field(default_factory=list)
 
+    # 브리핑 포함 여부
+    briefed_at: Optional[datetime] = None
+
     # 중복 처리
     content_hash: Optional[str] = None
     dedup_cluster_id: Optional[int] = None

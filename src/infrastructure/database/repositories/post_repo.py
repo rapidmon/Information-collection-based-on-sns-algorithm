@@ -37,6 +37,7 @@ def _post_to_dict(post: Post) -> dict[str, Any]:
         "language": post.language,
         "is_relevant": post.is_relevant,
         "category_names": post.category_names,
+        "briefed_at": post.briefed_at,
         "content_hash": post.content_hash,
         "dedup_cluster_id": post.dedup_cluster_id,
     }
@@ -65,6 +66,7 @@ def _post_from_doc(doc) -> Post:
         language=d.get("language"),
         is_relevant=d.get("is_relevant"),
         category_names=d.get("category_names", []),
+        briefed_at=d.get("briefed_at"),
         content_hash=d.get("content_hash"),
         dedup_cluster_id=d.get("dedup_cluster_id"),
     )
@@ -245,6 +247,57 @@ class FirestorePostRepository:
             return posts[offset : offset + limit]
 
         return await asyncio.to_thread(_search)
+
+    async def delete(self, post_id: str) -> None:
+        """게시물 삭제."""
+        def _delete():
+            self._col().document(post_id).delete()
+        await asyncio.to_thread(_delete)
+
+    async def delete_many(self, post_ids: list[str]) -> int:
+        """여러 게시물 일괄 삭제."""
+        def _delete_many():
+            batch = self._db.batch()
+            count = 0
+            for pid in post_ids:
+                batch.delete(self._col().document(pid))
+                count += 1
+                if count % 400 == 0:
+                    batch.commit()
+                    batch = self._db.batch()
+            if count % 400 != 0:
+                batch.commit()
+            return count
+        return await asyncio.to_thread(_delete_many)
+
+    async def get_unbriefed(self, limit: int = 500) -> list[Post]:
+        """브리핑에 포함되지 않은 관련 게시물 조회."""
+        def _get():
+            query = (
+                self._col()
+                .where("is_relevant", "==", True)
+                .where("briefed_at", "==", None)
+                .order_by("collected_at", direction="DESCENDING")
+                .limit(limit)
+            )
+            return [_post_from_doc(doc) for doc in query.stream()]
+        return await asyncio.to_thread(_get)
+
+    async def mark_briefed(self, post_ids: list[str], briefed_at: datetime) -> int:
+        """게시물들을 브리핑 완료로 마킹."""
+        def _mark():
+            batch = self._db.batch()
+            count = 0
+            for pid in post_ids:
+                batch.update(self._col().document(pid), {"briefed_at": briefed_at})
+                count += 1
+                if count % 400 == 0:
+                    batch.commit()
+                    batch = self._db.batch()
+            if count % 400 != 0:
+                batch.commit()
+            return count
+        return await asyncio.to_thread(_mark)
 
     async def count_by_source(self, start: datetime, end: datetime) -> dict[str, int]:
         def _count():
