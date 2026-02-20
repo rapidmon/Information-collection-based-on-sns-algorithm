@@ -92,7 +92,7 @@ class LinkedInCollector(BaseCollector):
                         seen_ids.add(post.external_id)
                         posts.append(post)
 
-                scroll_amount = random.randint(400, 900)
+                scroll_amount = random.randint(800, 1500)
                 await page.evaluate(f"window.scrollBy(0, {scroll_amount})")
                 await asyncio.sleep(
                     random.uniform(self._config.scroll_delay_min, self._config.scroll_delay_max)

@@ -1,7 +1,7 @@
 """DCInside 특이점이온다 갤러리 수집기.
 
-CDP로 사용자의 Chrome에 연결하여 이미 열려있는 개념글 탭을 읽거나,
-없으면 새 탭으로 개념글 페이지를 열어 수집한다.
+CDP로 사용자의 Chrome에 연결하여 이미 열려있는 개념글 탭에서
+게시물 목록을 읽고, 각 게시물 상세 페이지에서 본문을 수집한다.
 """
 
 from __future__ import annotations
@@ -22,13 +22,9 @@ from src.infrastructure.config.settings import CollectorConfig
 
 logger = logging.getLogger(__name__)
 
-# 개념글 URL 패턴
 _RECOMMEND_URL_DESKTOP = (
     "https://gall.dcinside.com/mgallery/board/lists/"
     "?id={gallery_id}&exception_mode=recommend"
-)
-_RECOMMEND_URL_MOBILE = (
-    "https://m.dcinside.com/board/{gallery_id}?recommend=1"
 )
 
 
@@ -46,7 +42,7 @@ class DCInsideCollector(BaseCollector):
         return "dcinside"
 
     async def collect(self) -> list[Post]:
-        """Chrome에서 개념글 탭을 찾거나 새로 열어서 수집."""
+        """개념글 탭에서 목록을 읽고, 각 게시물 상세에서 본문 수집."""
         pw = await async_playwright().start()
 
         try:
@@ -66,52 +62,42 @@ class DCInsideCollector(BaseCollector):
 
             if page:
                 logger.info(f"[dcinside] 기존 탭 발견: {page.url}")
-                # 기존 탭 새로고침하여 최신 데이터 로드
                 await page.reload(wait_until="domcontentloaded", timeout=30000)
             else:
-                # 새 탭으로 개념글 페이지 열기
-                recommend_url = _RECOMMEND_URL_MOBILE.format(gallery_id=self._gallery_id)
+                # 탭이 없으면 새로 열기
+                recommend_url = _RECOMMEND_URL_DESKTOP.format(gallery_id=self._gallery_id)
                 page = await context.new_page()
                 await page.goto(recommend_url, wait_until="domcontentloaded", timeout=30000)
                 logger.info(f"[dcinside] 새 탭으로 개념글 페이지 열기: {recommend_url}")
 
             await asyncio.sleep(random.uniform(1.0, 2.0))
 
-            # 현재 페이지 파싱
+            # 현재 페이지에서 게시물 목록 파싱 (최대 20건)
             html = await page.content()
-            page_posts = self._parse_list_page(html, seen_ids)
-            posts.extend(page_posts)
+            posts = self._parse_list_page(html, seen_ids)[:20]
 
-            # 추가 페이지 로드 (스크롤 또는 페이지 이동)
-            for page_num in range(2, self._pages + 1):
-                await asyncio.sleep(random.uniform(1.5, 3.0))
+            logger.info(f"[dcinside] 목록에서 {len(posts)}건 발견, 상세 페이지 수집 시작")
 
-                # 다음 페이지로 이동
-                next_url = _RECOMMEND_URL_MOBILE.format(gallery_id=self._gallery_id)
-                next_url += f"&page={page_num}"
-                await page.goto(next_url, wait_until="domcontentloaded", timeout=30000)
-                await asyncio.sleep(random.uniform(1.0, 2.0))
-
-                html = await page.content()
-                page_posts = self._parse_list_page(html, seen_ids)
-                posts.extend(page_posts)
-                logger.debug(f"[dcinside] 페이지 {page_num}: {len(page_posts)}건")
-
-            # 상세 페이지에서 본문 가져오기
+            # 각 게시물 상세 페이지에서 본문 가져오기
             for post in posts:
-                if post.content_text and post.url:
-                    try:
-                        await asyncio.sleep(random.uniform(0.8, 1.5))
-                        detail_url = self._to_mobile_detail_url(post.url)
-                        await page.goto(detail_url, wait_until="domcontentloaded", timeout=20000)
-                        html = await page.content()
-                        content_text, media_urls = self._parse_detail_page(html)
-                        if content_text:
-                            title = post.content_text
-                            post.content_text = f"{title}\n\n{content_text}"
-                            post.media_urls = media_urls
-                    except Exception as e:
-                        logger.debug(f"[dcinside] 상세 페이지 로드 실패: {e}")
+                try:
+                    await asyncio.sleep(random.uniform(0.8, 1.5))
+                    await page.goto(post.url, wait_until="domcontentloaded", timeout=20000)
+                    html = await page.content()
+                    content_text, media_urls = self._parse_detail_page(html)
+                    if content_text:
+                        title = post.content_text
+                        post.content_text = f"{title}\n\n{content_text}"
+                        post.media_urls = media_urls
+                except Exception as e:
+                    logger.debug(f"[dcinside] 상세 페이지 로드 실패 ({post.external_id}): {e}")
+
+            # 개념글 탭으로 복귀
+            try:
+                recommend_url = _RECOMMEND_URL_DESKTOP.format(gallery_id=self._gallery_id)
+                await page.goto(recommend_url, wait_until="domcontentloaded", timeout=15000)
+            except Exception:
+                pass
 
             logger.info(f"[dcinside] 총 {len(posts)}건 수집 완료")
 
@@ -124,46 +110,44 @@ class DCInsideCollector(BaseCollector):
         """이미 열려있는 DCInside 갤러리 탭을 찾는다."""
         for page in context.pages:
             url = page.url
-            if self._gallery_id in url and ("dcinside" in url):
+            if self._gallery_id in url and "dcinside" in url:
                 return page
         return None
 
     def _parse_list_page(self, html: str, seen_ids: set[str]) -> list[Post]:
-        """목록 페이지 HTML에서 게시물 리스트를 추출."""
+        """데스크톱 개념글 목록 페이지에서 게시물 리스트를 추출."""
         soup = BeautifulSoup(html, "lxml")
         posts: list[Post] = []
 
-        article_list = soup.select("ul.gall-detail-lst li")
-        if not article_list:
-            article_list = soup.select("div.gall-detail-lnktb ul li")
+        # 데스크톱: tr.ub-content (갤러리 게시물 행)
+        rows = soup.select("tr.ub-content")
 
-        for item in article_list:
+        for row in rows:
             try:
-                post = self._parse_list_item(item, seen_ids)
+                post = self._parse_desktop_row(row, seen_ids)
                 if post:
                     posts.append(post)
             except Exception as e:
-                logger.debug(f"[dcinside] 항목 파싱 실패: {e}")
+                logger.debug(f"[dcinside] 행 파싱 실패: {e}")
 
         return posts
 
-    def _parse_list_item(self, item: Tag, seen_ids: set[str]) -> Optional[Post]:
-        """목록 아이템에서 게시물 정보 추출."""
-        class_list = item.get("class", [])
-        if isinstance(class_list, list) and any(
-            c in class_list for c in ["ad", "adv", "notice"]
-        ):
-            return None
+    def _parse_desktop_row(self, row: Tag, seen_ids: set[str]) -> Optional[Post]:
+        """데스크톱 테이블 행에서 게시물 정보 추출."""
+        # 공지/광고 제외
+        gall_num = row.select_one("td.gall_num")
+        if gall_num:
+            num_text = gall_num.get_text(strip=True)
+            if num_text in ("공지", "설문", "AD", "뉴스"):
+                return None
 
-        link_tag = item.select_one("a.lt") or item.select_one("a")
-        if not link_tag:
-            return None
-
-        href = link_tag.get("href", "")
-        if not href:
-            return None
-
-        post_no = self._extract_post_no(href)
+        # 게시물 번호
+        post_no = row.get("data-no", "")
+        if not post_no:
+            if gall_num:
+                num_text = gall_num.get_text(strip=True)
+                if num_text.isdigit():
+                    post_no = num_text
         if not post_no:
             return None
 
@@ -172,24 +156,48 @@ class DCInsideCollector(BaseCollector):
             return None
         seen_ids.add(external_id)
 
-        subject_tag = link_tag.select_one(".subjectin") or link_tag
-        title = subject_tag.get_text(strip=True)
+        # 제목
+        title_td = row.select_one("td.gall_tit")
+        if not title_td:
+            return None
+
+        title_link = title_td.select_one("a:not(.icon_img):not(.reply_numbox)")
+        if not title_link:
+            title_link = title_td.select_one("a")
+        if not title_link:
+            return None
+
+        title = title_link.get_text(strip=True)
         if not title:
             return None
 
+        # 작성자
         author = ""
-        author_tag = item.select_one(".ginfo .nick") or item.select_one(".name")
-        if author_tag:
-            author = author_tag.get_text(strip=True)
+        writer_td = row.select_one("td.gall_writer")
+        if writer_td:
+            nick_el = writer_td.select_one(".nickname") or writer_td.select_one("em")
+            if nick_el:
+                author = nick_el.get_text(strip=True)
+            else:
+                author = writer_td.get("data-nick", "")
 
+        # 댓글 수
         comment_count = 0
-        comment_tag = item.select_one(".ct")
-        if comment_tag:
-            ct_text = comment_tag.get_text(strip=True).strip("[]")
+        reply_el = title_td.select_one(".reply_numbox .reply_num")
+        if reply_el:
+            ct_text = reply_el.get_text(strip=True).strip("[]")
             if ct_text.isdigit():
                 comment_count = int(ct_text)
 
-        desktop_url = (
+        # 조회수
+        views = 0
+        count_td = row.select_one("td.gall_count")
+        if count_td:
+            count_text = count_td.get_text(strip=True)
+            if count_text.isdigit():
+                views = int(count_text)
+
+        post_url = (
             f"https://gall.dcinside.com/mgallery/board/view/"
             f"?id={self._gallery_id}&no={post_no}"
         )
@@ -197,19 +205,20 @@ class DCInsideCollector(BaseCollector):
         return Post(
             source="dcinside",
             external_id=external_id,
-            url=desktop_url,
+            url=post_url,
             author=author,
             content_text=title,
             engagement_comments=comment_count,
+            engagement_views=views,
             collected_at=datetime.utcnow(),
         )
 
     def _parse_detail_page(self, html: str) -> tuple[str, list[str]]:
-        """상세 페이지에서 본문과 이미지를 추출."""
+        """데스크톱 상세 페이지에서 본문과 이미지를 추출."""
         soup = BeautifulSoup(html, "lxml")
 
         content_div = (
-            soup.select_one(".thum-txtin")
+            soup.select_one(".write_div")
             or soup.select_one(".writing_view_box")
             or soup.select_one("#viewContent")
         )
@@ -226,20 +235,3 @@ class DCInsideCollector(BaseCollector):
                 media_urls.append(src)
 
         return content_text, media_urls
-
-    def _to_mobile_detail_url(self, desktop_url: str) -> str:
-        """데스크톱 URL을 모바일 상세 URL로 변환."""
-        match = re.search(r"[?&]no=(\d+)", desktop_url)
-        if match:
-            return f"https://m.dcinside.com/board/{self._gallery_id}/{match.group(1)}"
-        return desktop_url
-
-    def _extract_post_no(self, href: str) -> Optional[str]:
-        """URL에서 게시물 번호를 추출."""
-        match = re.search(r"/board/[^/]+/(\d+)", href)
-        if match:
-            return match.group(1)
-        match = re.search(r"[?&]no=(\d+)", href)
-        if match:
-            return match.group(1)
-        return None
