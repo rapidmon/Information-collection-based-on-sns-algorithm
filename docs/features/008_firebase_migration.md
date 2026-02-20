@@ -27,7 +27,9 @@ posts/
       ├── importance_score: number
       ├── is_relevant: boolean
       ├── category_names: array<string>
+      ├── **[NEW]** briefed_at: timestamp (브리핑 포함 시 마킹)
       ├── content_hash: string
+      ├── dedup_cluster_id: number
       └── raw_data: map
 
 briefings/
@@ -141,12 +143,24 @@ async def save_many(self, posts: list[Post]) -> list[Post]:
 
 > 첫 실행 시 Firestore 콘솔에서 인덱스 생성 링크가 로그에 출력됩니다.
 
+## **[NEW]** 추가된 Repository 메서드
+
+Firebase 전환 이후 추가된 메서드:
+- `PostRepository.delete(post_id)` — 단건 삭제
+- `PostRepository.delete_many(post_ids)` — 일괄 삭제 (관련 없는 게시물 제거)
+- `PostRepository.get_unbriefed(limit)` — 미브리핑 게시물 조회 (`is_relevant==True`, `briefed_at==None`)
+- `PostRepository.mark_briefed(post_ids, briefed_at)` — 브리핑 완료 마킹
+
+## **[NEW]** 변경된 레이어 (추가 변경)
+
+Firebase 전환 이후 추가로 변경된 레이어:
+- `src/domain/entities/post.py` — `briefed_at` 필드 추가
+- `src/application/use_cases/process_posts.py` — 관련 없는 게시물 삭제 로직
+- `src/application/use_cases/generate_briefing.py` — `get_unbriefed()` + `mark_briefed()` 사용
+
 ## 변경되지 않은 레이어
 
 클린 아키텍처의 이점으로 다음 레이어는 **변경 없음**:
-- `src/domain/` — 엔티티, 프로토콜, 예외, 값 객체
-- `src/application/` — 유즈케이스 (수집, 처리, 브리핑, 발송, 스케줄러)
 - `src/presentation/` — 웹 대시보드 (라우트, 템플릿)
 - `src/infrastructure/collectors/` — 수집기
-- `src/infrastructure/ai/` — AI 프로세서
 - `src/infrastructure/delivery/` — 브리핑 빌더, 이메일

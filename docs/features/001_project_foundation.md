@@ -43,9 +43,9 @@ src/
 │   └── dto/                   # 데이터 전송 객체
 ├── infrastructure/            # 인프라스트럭처 레이어
 │   ├── config/                # Settings (pydantic-settings), AppConfig (YAML)
-│   ├── database/              # SQLAlchemy 모델, 세션, Repository 구현
+│   ├── database/              # **[NEW]** Firebase Firestore 클라이언트 + Repository 구현
 │   ├── collectors/            # 각 플랫폼 수집기 구현
-│   ├── ai/                    # Claude API 연동
+│   ├── ai/                    # **[NEW]** OpenAI API 연동 (Claude → OpenAI 변경)
 │   └── delivery/              # 이메일 발송
 └── presentation/              # 프레젠테이션 레이어
     └── web/                   # FastAPI 웹 대시보드
@@ -65,10 +65,10 @@ src/
 
 | Protocol | 파일 | 구현체 |
 |----------|------|--------|
-| `PostRepository` | `domain/repositories/post_repository.py` | `SqlitePostRepository` |
-| `BriefingRepository` | `domain/repositories/briefing_repository.py` | `SqliteBriefingRepository` |
-| `CategoryRepository` | `domain/repositories/category_repository.py` | `SqliteCategoryRepository` |
-| `CollectionRunRepository` | `domain/repositories/collection_run_repository.py` | `SqliteCollectionRunRepository` |
+| `PostRepository` | `domain/repositories/post_repository.py` | **[NEW]** `FirestorePostRepository` |
+| `BriefingRepository` | `domain/repositories/briefing_repository.py` | **[NEW]** `FirestoreBriefingRepository` |
+| `CategoryRepository` | `domain/repositories/category_repository.py` | **[NEW]** `FirestoreCategoryRepository` |
+| `CollectionRunRepository` | `domain/repositories/collection_run_repository.py` | **[NEW]** `FirestoreCollectionRunRepository` |
 
 ## Service Protocol
 
@@ -90,13 +90,15 @@ src/
 
 ## 설정
 
-- **시크릿 (.env)**: `ANTHROPIC_API_KEY`, `SMTP_*`, `DATABASE_URL`
+- **시크릿 (.env)**: **[NEW]** `OPENAI_API_KEY`, `SMTP_*`, `FIREBASE_CREDENTIAL_PATH`, `FIREBASE_PROJECT_ID`
 - **앱 설정 (config/settings.yaml)**: 수집 주기, 카테고리, AI 모델, 웹 포트 등
 - **pydantic-settings** `Settings` 클래스가 .env를 자동 로드
 - **`AppConfig`** 클래스가 YAML을 파싱하여 타입이 있는 설정 객체 제공
 
 ## DB
 
-- **SQLite + aiosqlite**: 로컬 파일 기반, 비동기
-- **SQLAlchemy ORM**: 도메인 엔티티와 분리된 DB 모델 (`*Model` 클래스)
-- **mapper.py**: 도메인 엔티티 ↔ ORM 모델 양방향 변환
+**[NEW]** SQLite → Firebase Firestore로 변경됨:
+- **Firebase Firestore**: 클라우드 NoSQL 문서형 DB
+- **firebase-admin SDK**: 동기 전용이므로 `asyncio.to_thread()`로 비동기 래핑
+- **ORM/mapper 불필요**: Firestore 문서 ↔ 도메인 엔티티 직접 변환 (`_post_to_dict`, `_post_from_doc`)
+- 상세: [008_firebase_migration.md](008_firebase_migration.md) 참조

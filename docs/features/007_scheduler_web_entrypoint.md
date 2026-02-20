@@ -28,12 +28,21 @@ Container
 ## 스케줄러 (Orchestrator)
 
 ### 등록 작업
+**[NEW]** 스케줄 전면 변경:
 | 작업 | 트리거 | 설명 |
 |------|--------|------|
 | `collect_{source}` | IntervalTrigger(분) | 각 소스별 수집 |
-| `process_posts` | CronTrigger(:05분) | 매시 AI 처리 |
-| `daily_briefing` | CronTrigger(06:30) | 일일 브리핑 + 이메일 |
+| **[NEW]** `process_posts` | IntervalTrigger(10분) | ~~매시 :05분~~ → 10분마다 AI 처리 |
+| **[NEW]** `daily_briefing` | CronTrigger(09:00) | ~~06:30~~ → 09:00 브리핑 + 이메일 |
 | `health_check` | IntervalTrigger(5분) | 연속 실패 감지 알림 |
+
+### **[NEW]** 수집 주기 변경
+| 소스 | 기존 | 변경 |
+|------|------|------|
+| Twitter | 30분 | **10분** |
+| Threads | 45분 | **10분** |
+| LinkedIn | 60분 | **10분** |
+| DCInside | 30분 | **180분** |
 
 ### 헬스체크
 - 3회 연속 수집 실패 시 이메일 알림 발송
@@ -49,6 +58,14 @@ Container
 | `/posts` | 게시물 검색/필터 (소스, 카테고리, 키워드) |
 | `/status` | 시스템 상태: 수집 로그, 소스별 마지막 성공 |
 
+### **[NEW]** GitHub Pages 정적 대시보드
+로컬 FastAPI 대시보드 외에 GitHub Pages용 정적 대시보드도 구현:
+- `docs/index.html` — 메인 대시보드
+- `docs/posts.html` — 게시물 탐색
+- `docs/briefings.html` — 브리핑 아카이브
+- Firebase JS SDK로 Firestore 직접 읽기 (읽기만 공개)
+- Tailwind CSS + 바닐라 JS
+
 ### API
 | URL | Method | 설명 |
 |-----|--------|------|
@@ -59,6 +76,10 @@ Container
 | `/api/briefings/latest` | GET | 최신 브리핑 JSON |
 | `/api/stats` | GET | 수집 통계 |
 
+### **[NEW]** 대시보드 데이터 필터링
+- 대시보드에는 `is_relevant == true`인 AI 처리 완료 게시물만 표시
+- Firestore 쿼리와 GitHub Pages JS 모두 동일 필터 적용
+
 ### 기술 스택
 - **FastAPI** + **Jinja2** (서버사이드 렌더링)
 - **HTMX** (동적 업데이트, SPA 빌드 없이)
@@ -67,48 +88,34 @@ Container
 ## CLI 엔트리포인트 (main.py)
 
 ### 사용법
+**[NEW]** Python 3.12 명시, CDP 연결 방식:
 ```bash
-# 전체 시작 (수집 + AI + 웹 + 이메일)
-python main.py serve
+# 1. Chrome 디버그 모드로 실행 (필수)
+"C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222
 
-# DCInside만 수집 (브라우저 없이)
-python main.py serve --no-browser
+# 2. Chrome에서 Twitter, Threads, LinkedIn 로그인 + DCInside 개념글 탭 열기
+
+# 3. 전체 시작 (수집 + AI + 웹 + 이메일)
+py -3.12 main.py serve
 
 # 웹 대시보드만 (스케줄러 없이)
-python main.py serve --no-scheduler
+py -3.12 main.py serve --no-scheduler
 
-# SNS 수동 로그인
-python main.py login twitter
-python main.py login threads
-python main.py login linkedin
+# 즉시 수집 (서버 없이)
+py -3.12 main.py collect-now              # 전체 소스
+py -3.12 main.py collect-now twitter      # 트위터만
+
+# 서버 켜진 상태에서 수동 트리거
+curl -X POST http://localhost:8000/api/process/trigger    # AI 처리
+curl -X POST http://localhost:8000/api/briefing/generate  # 브리핑 생성
 ```
 
 ### 시작 순서
+**[NEW]** Firebase + CDP 기반:
 1. `.env` + `config/settings.yaml` 로드
-2. SQLite DB 초기화 (테이블 자동 생성)
-3. Playwright 브라우저 초기화 (선택적)
+2. **[NEW]** Firebase 초기화 (`init_firebase()` + `get_firestore_client()`)
+3. **[NEW]** CDP로 사용자 Chrome에 연결 (Playwright `connect_over_cdp`)
 4. Container 조립 (모든 의존성 주입)
 5. 카테고리 시드 데이터
 6. APScheduler 시작
 7. Uvicorn 웹 서버 시작
-
-## 초기 실행 가이드
-
-```bash
-# 1. 의존성 설치
-pip install -r requirements.txt
-playwright install chromium
-
-# 2. 환경변수 설정
-cp .env.example .env
-# .env 파일을 편집하여 API 키, SMTP 정보 입력
-
-# 3. SNS 로그인 (각 플랫폼)
-python main.py login twitter
-python main.py login threads
-python main.py login linkedin
-
-# 4. 서버 시작
-python main.py serve
-# → http://localhost:8000 에서 대시보드 확인
-```

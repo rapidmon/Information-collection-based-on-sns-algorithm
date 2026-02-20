@@ -20,8 +20,14 @@ MergedTopic[] → Briefing (items[], content_text, content_html)
 ### 생성 로직
 1. 중요도 내림차순 정렬 → max_items 제한 (기본 20)
 2. MergedTopic → BriefingItem 변환
-3. 카테고리별 그룹화 (고정 순서: AI → 반도체 → 클라우드 → 빅테크 → 스타트업 → 규제)
+3. **[NEW]** 카테고리별 그룹화 (고정 순서: AI → 반도체 → 클라우드 → 빅테크 → 스타트업 → 규제 → **코딩**)
 4. 텍스트 + HTML 동시 렌더링
+
+### **[NEW]** 미브리핑 게시물 추적 (briefed_at)
+- Post 엔티티에 `briefed_at` 필드 추가
+- 브리핑 생성 시 `get_unbriefed()` 로 미브리핑 게시물만 조회 (기존: 시간 범위 쿼리)
+- 브리핑 생성 완료 후 포함된 게시물에 `mark_briefed()` 호출
+- 동일 게시물이 여러 브리핑에 중복 포함되는 문제 해결
 
 ### 출력 형식
 
@@ -65,7 +71,13 @@ MergedTopic[] → Briefing (items[], content_text, content_html)
 - 활성화/비활성화 설정
 
 ### 설정
+**[NEW]** 브리핑 시간 변경:
 ```yaml
+briefing:
+  daily_time: "09:00"          # [NEW] 06:30 → 09:00
+  max_items: 20
+  include_stats: true
+
 email:
   enabled: true
   to_addresses:
