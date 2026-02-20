@@ -1,6 +1,7 @@
 """유즈케이스: AI 처리 파이프라인.
 
 미처리 게시물을 가져와 필터링, 요약, 분류를 수행한다.
+관련 없는 게시물은 Firestore에서 삭제한다.
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ class ProcessPostsUseCase:
         posts = await self._post_repo.get_unprocessed(limit=limit)
         if not posts:
             logger.info("처리할 새 게시물 없음")
-            return {"total": 0, "relevant": 0, "filtered_out": 0}
+            return {"total": 0, "relevant": 0, "filtered_out": 0, "deleted": 0}
 
         logger.info(f"AI 처리 시작: {len(posts)}건")
 
@@ -34,6 +35,7 @@ class ProcessPostsUseCase:
 
         post_map = {p.id: p for p in posts}
         relevant_posts = []
+        irrelevant_ids = []
 
         for result in filter_results:
             post = post_map.get(result.post_id)
@@ -44,6 +46,11 @@ class ProcessPostsUseCase:
             post.language = result.language
             if result.is_relevant:
                 relevant_posts.append(post)
+            else:
+                # 관련 없는 게시물은 삭제 대상
+                doc_id = post.id or post.external_id
+                if doc_id:
+                    irrelevant_ids.append(doc_id)
 
         # 2. 관련 게시물만 분류 + 중요도
         if relevant_posts:
@@ -55,18 +62,25 @@ class ProcessPostsUseCase:
                     post.category_names = cr.categories
                     post.importance_score = cr.importance_score
 
-        # 3. DB 업데이트
-        for post in posts:
+        # 3. 관련 게시물만 DB 업데이트
+        for post in relevant_posts:
             if post.id is not None:
                 await self._post_repo.update(post)
+
+        # 4. 관련 없는 게시물 삭제
+        deleted = 0
+        if irrelevant_ids:
+            deleted = await self._post_repo.delete_many(irrelevant_ids)
+            logger.info(f"관련 없는 게시물 {deleted}건 삭제")
 
         stats = {
             "total": len(posts),
             "relevant": len(relevant_posts),
-            "filtered_out": len(posts) - len(relevant_posts),
+            "filtered_out": len(irrelevant_ids),
+            "deleted": deleted,
         }
         logger.info(
             f"AI 처리 완료: 전체 {stats['total']}건, "
-            f"관련 {stats['relevant']}건, 제외 {stats['filtered_out']}건"
+            f"관련 {stats['relevant']}건, 삭제 {stats['deleted']}건"
         )
         return stats
