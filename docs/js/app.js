@@ -109,63 +109,135 @@ export function showEmpty(containerId, message) {
     }
 }
 
+// Category → color mapping
+const CATEGORY_COLORS = {
+    AI: 'bg-violet-100 text-violet-700',
+    Semiconductor: 'bg-emerald-100 text-emerald-700',
+    Cloud: 'bg-cyan-100 text-cyan-700',
+    BigTech: 'bg-blue-100 text-blue-700',
+    Startup: 'bg-pink-100 text-pink-700',
+    Regulation: 'bg-red-100 text-red-700',
+    Coding: 'bg-amber-100 text-amber-700',
+};
+
+// Keyword → color by position
+const KW_STYLES = [
+    'bg-blue-100 text-blue-800 text-base',
+    'bg-indigo-100 text-indigo-700 text-sm',
+    'bg-violet-100 text-violet-700 text-sm',
+    'bg-slate-100 text-slate-600 text-xs',
+    'bg-gray-100 text-gray-600 text-xs',
+];
+
+// Importance score badge color
+function importanceBadge(score) {
+    if (!score && score !== 0) return '';
+    let color = 'bg-gray-50 text-gray-500';
+    if (score >= 0.8) color = 'bg-red-50 text-red-600';
+    else if (score >= 0.6) color = 'bg-amber-50 text-amber-600';
+    return `<span class="text-xs font-bold px-2 py-0.5 rounded-full ${color}">${score.toFixed(1)}</span>`;
+}
+
 /**
- * 게시물 카드 HTML 생성
+ * 게시물 플립 카드 HTML 생성
  */
 export function renderPostCard(post) {
-    const badge = sourceBadge(post.source);
-    const author = escapeHtml(truncate(post.author || '', 30));
-    const stars = post.importance_score
-        ? `<span class="text-xs text-yellow-600">${importanceStars(post.importance_score)}</span>`
-        : '';
+    const source = escapeHtml(post.source || '');
+    const sourceColor = SOURCE_COLORS[post.source] || 'bg-gray-100 text-gray-700';
+    const author = escapeHtml(truncate(post.author || '', 20));
     const time = formatTimestamp(post.collected_at, 'short');
 
-    let contentHtml;
-    if (post.summary) {
-        contentHtml = `
-            <p class="text-sm text-gray-800 mb-1">${escapeHtml(post.summary)}</p>
-            <details class="text-xs text-gray-500">
-                <summary class="cursor-pointer hover:text-gray-700">원문 보기</summary>
-                <p class="mt-1 whitespace-pre-wrap">${escapeHtml(truncate(post.content_text, 500))}</p>
-            </details>`;
-    } else {
-        contentHtml = `<p class="text-sm text-gray-700">${escapeHtml(truncate(post.content_text, 300))}</p>`;
-    }
-
-    const categories = (post.category_names || []).map(cat =>
-        `<span class="text-xs px-1.5 py-0.5 bg-gray-100 rounded text-gray-600">${escapeHtml(cat)}</span>`
+    // 앞면: 키워드
+    const keywords = (post.keywords || []).slice(0, 5).map((kw, i) =>
+        `<span class="font-semibold px-3 py-1.5 rounded-lg ${KW_STYLES[i] || KW_STYLES[4]}">${escapeHtml(kw)}</span>`
     ).join('');
+    const kwSection = keywords
+        ? keywords
+        : '<p class="text-sm text-gray-400 italic">키워드 없음</p>';
 
+    // 뒷면: 카테고리
+    const categories = (post.category_names || []).map(cat => {
+        const cc = CATEGORY_COLORS[cat] || 'bg-gray-100 text-gray-600';
+        return `<span class="text-[11px] px-2 py-0.5 rounded-full ${cc}">${escapeHtml(cat)}</span>`;
+    }).join('');
+
+    // 뒷면: 본문
+    const body = post.summary
+        ? escapeHtml(post.summary)
+        : escapeHtml(truncate(post.content_text, 300));
+
+    // 뒷면: 원문 링크
     const link = post.url
-        ? `<a href="${escapeHtml(post.url)}" target="_blank" rel="noopener" class="text-xs text-blue-500 hover:text-blue-700 mt-2 inline-block">원문 링크 →</a>`
+        ? `<a href="${escapeHtml(post.url)}" target="_blank" rel="noopener"
+               onclick="event.stopPropagation()"
+               class="inline-flex items-center gap-1 text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg transition-colors">
+               원문 보기
+               <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+               </svg>
+           </a>`
         : '';
 
     return `
-    <div class="bg-white rounded-lg shadow p-4 card-hover">
-        <div class="flex items-center gap-2 mb-2">
-            ${badge}
-            <span class="text-sm font-medium">${author}</span>
-            ${stars}
-            <span class="text-xs text-gray-400 ml-auto">${time}</span>
+    <div class="card-container cursor-pointer" onclick="this.querySelector('.card-inner').classList.toggle('flipped')">
+        <div class="card-inner">
+            <!-- 앞면 -->
+            <div class="card-front bg-white shadow-sm border border-gray-100 flex flex-col">
+                <div class="px-4 pt-3 pb-2 flex items-center justify-between">
+                    <span class="text-xs font-medium px-2 py-0.5 rounded-full ${sourceColor}">${source}</span>
+                    ${importanceBadge(post.importance_score)}
+                </div>
+                <div class="flex-1 px-4 py-3 flex flex-wrap content-center gap-2 justify-center">
+                    ${kwSection}
+                </div>
+                <div class="px-4 py-2 border-t border-gray-50 flex items-center justify-between text-xs text-gray-400">
+                    <span class="truncate max-w-[120px]">${author}</span>
+                    <span class="flex items-center gap-1">
+                        ${time}
+                        <svg class="w-3.5 h-3.5 ml-1 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                        </svg>
+                    </span>
+                </div>
+            </div>
+            <!-- 뒷면 -->
+            <div class="card-back bg-white shadow-sm border border-gray-100 flex flex-col">
+                ${categories ? `<div class="px-4 pt-3 pb-1 flex gap-1.5 flex-wrap">${categories}</div>` : ''}
+                <div class="flex-1 px-4 py-2 overflow-y-auto">
+                    <p class="text-sm text-gray-800 leading-relaxed">${body}</p>
+                </div>
+                <div class="px-4 py-2.5 border-t border-gray-50 flex items-center justify-between">
+                    <span class="text-xs text-gray-400 truncate max-w-[120px]">${author}</span>
+                    ${link}
+                </div>
+            </div>
         </div>
-        ${contentHtml}
-        ${categories ? `<div class="flex gap-1 mt-2 flex-wrap">${categories}</div>` : ''}
-        ${link}
     </div>`;
 }
 
 /**
  * 스켈레톤 카드 (로딩 플레이스홀더)
  */
-export function skeletonCards(count = 3) {
+export function skeletonCards(count = 6) {
     return Array.from({ length: count }, () => `
-        <div class="bg-white rounded-lg shadow p-4">
-            <div class="flex items-center gap-2 mb-3">
-                <div class="skeleton w-16 h-5"></div>
-                <div class="skeleton w-24 h-4"></div>
+        <div class="card-container">
+            <div class="card-inner">
+                <div class="card-front bg-white shadow-sm border border-gray-100 flex flex-col rounded-xl p-4">
+                    <div class="flex items-center justify-between mb-4">
+                        <div class="skeleton w-16 h-5"></div>
+                        <div class="skeleton w-10 h-5"></div>
+                    </div>
+                    <div class="flex-1 flex flex-wrap content-center gap-2 justify-center">
+                        <div class="skeleton w-20 h-7 rounded-lg"></div>
+                        <div class="skeleton w-16 h-6 rounded-lg"></div>
+                        <div class="skeleton w-24 h-6 rounded-lg"></div>
+                    </div>
+                    <div class="flex items-center justify-between mt-4">
+                        <div class="skeleton w-20 h-3"></div>
+                        <div class="skeleton w-16 h-3"></div>
+                    </div>
+                </div>
             </div>
-            <div class="skeleton w-full h-4 mb-2"></div>
-            <div class="skeleton w-3/4 h-4"></div>
         </div>
     `).join('');
 }
