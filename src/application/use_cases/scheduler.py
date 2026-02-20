@@ -46,10 +46,10 @@ class Orchestrator:
             )
             logger.info(f"수집 작업 등록: {source} (매 {cfg.interval_minutes}분)")
 
-        # ─── AI 처리 (매시 :05분) ───
+        # ─── AI 처리 (10분마다) ───
         self.scheduler.add_job(
             self._run_processing,
-            trigger=CronTrigger(minute=5),
+            trigger=IntervalTrigger(minutes=10),
             id="process_posts",
             name="AI Process Posts",
             max_instances=1,

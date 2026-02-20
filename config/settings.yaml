@@ -18,7 +18,7 @@ collection:
     scroll_delay_max: 5.0
   linkedin:
     enabled: true
-    interval_minutes: 60
+    interval_minutes: 10
     scroll_rounds: 8
     scroll_delay_min: 3.0
     scroll_delay_max: 7.0
@@ -63,7 +63,7 @@ categories:
 
 processing:
   model_filter: "gpt-4o-mini"
-  model_process: "gpt-4o"
+  model_process: "gpt-4o-mini"
   batch_size_filter: 20
   batch_size_summarize: 15
   batch_size_categorize: 20
@@ -71,7 +71,7 @@ processing:
   min_importance_for_briefing: 0.4
 
 briefing:
-  daily_time: "06:30"
+  daily_time: "09:00"
   max_items: 20
   include_stats: true
 
