@@ -61,6 +61,7 @@ class ProcessPostsUseCase:
                 if cr := cat_map.get(post.id):
                     post.category_names = cr.categories
                     post.importance_score = cr.importance_score
+                    post.keywords = cr.keywords or []
 
         # 3. 관련 게시물만 DB 업데이트
         for post in relevant_posts:

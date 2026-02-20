@@ -148,6 +148,7 @@ class OpenAIProcessor:
                             post_id=item["post_id"],
                             categories=item.get("categories", []),
                             importance_score=item.get("importance_score", 0.5),
+                            keywords=item.get("keywords", []),
                         )
                     )
             except Exception as e:

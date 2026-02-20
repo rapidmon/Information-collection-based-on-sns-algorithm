@@ -34,6 +34,7 @@ def _post_to_dict(post: Post) -> dict[str, Any]:
         "language": post.language,
         "is_relevant": post.is_relevant,
         "category_names": post.category_names,
+        "keywords": post.keywords,
         "briefed_at": post.briefed_at,
         "content_hash": post.content_hash,
         "dedup_cluster_id": post.dedup_cluster_id,
@@ -63,6 +64,7 @@ def _post_from_doc(doc) -> Post:
         language=d.get("language"),
         is_relevant=d.get("is_relevant"),
         category_names=d.get("category_names", []),
+        keywords=d.get("keywords", []),
         briefed_at=d.get("briefed_at"),
         content_hash=d.get("content_hash"),
         dedup_cluster_id=d.get("dedup_cluster_id"),
@@ -177,6 +179,7 @@ class FirestorePostRepository:
                 "language": post.language,
                 "is_relevant": post.is_relevant,
                 "category_names": post.category_names,
+                "keywords": post.keywords,
                 "dedup_cluster_id": post.dedup_cluster_id,
             })
             return post

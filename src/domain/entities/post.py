@@ -34,6 +34,7 @@ class Post:
     language: Optional[str] = None
     is_relevant: Optional[bool] = None
     category_names: list[str] = field(default_factory=list)
+    keywords: list[str] = field(default_factory=list)
 
     # 브리핑 포함 여부
     briefed_at: Optional[datetime] = None

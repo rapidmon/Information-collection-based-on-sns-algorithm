@@ -19,6 +19,7 @@ class CategoryResult:
     post_id: int
     categories: list[str]
     importance_score: float
+    keywords: list[str] | None = None
 
 
 @dataclass
