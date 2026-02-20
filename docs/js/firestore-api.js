@@ -10,9 +10,14 @@ import { db } from './firebase-config.js';
  * @returns {Promise<{ posts: Array, lastDoc: Object|null }>}
  */
 export async function getRecentPosts(opts = {}) {
-    const { source, category, searchQuery, limitCount = 50, lastDoc: cursor } = opts;
+    const { source, category, searchQuery, limitCount = 50, lastDoc: cursor, includeUnprocessed = false } = opts;
 
     const constraints = [];
+
+    // AI 처리 완료된 게시물만 (is_relevant == true)
+    if (!includeUnprocessed) {
+        constraints.push(where('is_relevant', '==', true));
+    }
 
     if (source) {
         constraints.push(where('source', '==', source));

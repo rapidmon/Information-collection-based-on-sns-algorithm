@@ -204,15 +204,24 @@ class FirestorePostRepository:
         end: datetime | None = None,
         limit: int = 50,
         offset: int = 0,
+        relevant_only: bool = True,
     ) -> list[Post]:
         def _search():
             col = self._col()
-            q = col.order_by("collected_at", direction="DESCENDING")
 
-            if source:
+            # AI 처리 완료된 게시물만 (is_relevant == True)
+            if relevant_only:
+                q = col.where("is_relevant", "==", True)
+                if source:
+                    q = q.where("source", "==", source)
+                q = q.order_by("collected_at", direction="DESCENDING")
+            elif source:
                 q = col.where("source", "==", source).order_by(
                     "collected_at", direction="DESCENDING"
                 )
+            else:
+                q = col.order_by("collected_at", direction="DESCENDING")
+
             if start:
                 q = q.where("collected_at", ">=", start)
             if end:
