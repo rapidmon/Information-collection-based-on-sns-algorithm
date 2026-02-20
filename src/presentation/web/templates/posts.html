@@ -2,34 +2,53 @@
 {% block title %}게시물 탐색{% endblock %}
 
 {% block content %}
+<style>
+    .card-container { perspective: 1000px; }
+    .card-inner {
+        position: relative;
+        width: 100%;
+        height: 280px;
+        transition: transform 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+        transform-style: preserve-3d;
+    }
+    .card-inner.flipped { transform: rotateY(180deg); }
+    .card-front, .card-back {
+        position: absolute;
+        inset: 0;
+        backface-visibility: hidden;
+        -webkit-backface-visibility: hidden;
+        border-radius: 0.75rem;
+        overflow: hidden;
+    }
+    .card-back { transform: rotateY(180deg); }
+    @media (max-width: 640px) {
+        .card-inner { height: 240px; }
+    }
+</style>
+
 <h1 class="text-2xl font-bold mb-4">게시물 탐색</h1>
 
 <!-- 필터 바 -->
-<div class="bg-white rounded-lg shadow p-4 mb-6">
+<div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-6">
     <form method="get" action="/posts" class="flex flex-wrap gap-3 items-end">
-        <!-- 검색 -->
         <div class="flex-1 min-w-[200px]">
             <label class="text-xs text-gray-500 block mb-1">검색</label>
             <input type="text" name="q" value="{{ current_query or '' }}"
                    placeholder="키워드 검색..."
-                   class="w-full border rounded px-3 py-2 text-sm">
+                   class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
         </div>
-
-        <!-- 소스 필터 -->
         <div>
             <label class="text-xs text-gray-500 block mb-1">소스</label>
-            <select name="source" class="border rounded px-3 py-2 text-sm">
+            <select name="source" class="border border-gray-200 rounded-lg px-3 py-2 text-sm">
                 <option value="">전체</option>
                 {% for s in ['twitter', 'threads', 'linkedin', 'dcinside'] %}
                 <option value="{{ s }}" {% if current_source == s %}selected{% endif %}>{{ s }}</option>
                 {% endfor %}
             </select>
         </div>
-
-        <!-- 카테고리 필터 -->
         <div>
             <label class="text-xs text-gray-500 block mb-1">카테고리</label>
-            <select name="category" class="border rounded px-3 py-2 text-sm">
+            <select name="category" class="border border-gray-200 rounded-lg px-3 py-2 text-sm">
                 <option value="">전체</option>
                 {% for cat in categories %}
                 <option value="{{ cat.name }}" {% if current_category == cat.name %}selected{% endif %}>
@@ -38,67 +57,117 @@
                 {% endfor %}
             </select>
         </div>
-
-        <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700">
+        <button type="submit" class="bg-blue-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors">
             검색
         </button>
         <a href="/posts" class="text-gray-400 text-sm hover:text-gray-600 py-2">초기화</a>
     </form>
 </div>
 
-<!-- 게시물 목록 -->
-<div class="space-y-3">
+<!-- 게시물 플립 카드 그리드 -->
+<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
     {% for post in posts %}
-    <div class="bg-white rounded-lg shadow p-4">
-        <div class="flex items-center gap-2 mb-2">
-            <span class="text-xs px-2 py-0.5 rounded
-                {% if post.source == 'twitter' %}bg-blue-100 text-blue-700
-                {% elif post.source == 'threads' %}bg-purple-100 text-purple-700
-                {% elif post.source == 'linkedin' %}bg-sky-100 text-sky-700
-                {% else %}bg-gray-100 text-gray-700{% endif %}
-            ">{{ post.source }}</span>
-            <span class="text-sm font-medium">{{ post.author[:30] }}</span>
-            {% if post.importance_score %}
-            <span class="text-xs text-yellow-600">
-                {% if post.importance_score >= 0.9 %}★★★★★
-                {% elif post.importance_score >= 0.7 %}★★★★☆
-                {% elif post.importance_score >= 0.5 %}★★★☆☆
-                {% else %}★★☆☆☆{% endif %}
-            </span>
-            {% endif %}
-            <span class="text-xs text-gray-400 ml-auto">
-                {% if post.collected_at %}{{ post.collected_at.strftime('%m-%d %H:%M') }}{% endif %}
-            </span>
+    <div class="card-container cursor-pointer" onclick="this.querySelector('.card-inner').classList.toggle('flipped')">
+        <div class="card-inner">
+            {# === 앞면: 키워드 + 소스 + 중요도 === #}
+            <div class="card-front bg-white shadow-sm border border-gray-100 flex flex-col">
+                {# 상단 바: 소스 + 중요도 #}
+                <div class="px-4 pt-3 pb-2 flex items-center justify-between">
+                    <span class="text-xs font-medium px-2 py-0.5 rounded-full
+                        {% if post.source == 'twitter' %}bg-blue-50 text-blue-600
+                        {% elif post.source == 'threads' %}bg-purple-50 text-purple-600
+                        {% elif post.source == 'linkedin' %}bg-sky-50 text-sky-600
+                        {% else %}bg-orange-50 text-orange-600{% endif %}
+                    ">{{ post.source }}</span>
+
+                    {% if post.importance_score %}
+                    <span class="text-xs font-bold px-2 py-0.5 rounded-full
+                        {% if post.importance_score >= 0.8 %}bg-red-50 text-red-600
+                        {% elif post.importance_score >= 0.6 %}bg-amber-50 text-amber-600
+                        {% else %}bg-gray-50 text-gray-500{% endif %}
+                    ">{{ "%.1f"|format(post.importance_score) }}</span>
+                    {% endif %}
+                </div>
+
+                {# 키워드 영역 #}
+                <div class="flex-1 px-4 py-3 flex flex-wrap content-center gap-2 justify-center">
+                    {% if post.keywords %}
+                        {% for kw in post.keywords[:5] %}
+                        <span class="text-sm font-semibold px-3 py-1.5 rounded-lg
+                            {% if loop.index == 1 %}bg-blue-100 text-blue-800 text-base
+                            {% elif loop.index == 2 %}bg-indigo-100 text-indigo-700
+                            {% elif loop.index == 3 %}bg-violet-100 text-violet-700
+                            {% elif loop.index == 4 %}bg-slate-100 text-slate-600 text-xs
+                            {% else %}bg-gray-100 text-gray-600 text-xs{% endif %}
+                        ">{{ kw }}</span>
+                        {% endfor %}
+                    {% else %}
+                        <p class="text-sm text-gray-400 italic">키워드 없음</p>
+                    {% endif %}
+                </div>
+
+                {# 하단: 작성자 + 시간 + 뒤집기 힌트 #}
+                <div class="px-4 py-2 border-t border-gray-50 flex items-center justify-between text-xs text-gray-400">
+                    <span class="truncate max-w-[120px]">{{ post.author[:20] }}</span>
+                    <span class="flex items-center gap-1">
+                        {% if post.collected_at %}{{ post.collected_at.strftime('%m-%d %H:%M') }}{% endif %}
+                        <svg class="w-3.5 h-3.5 ml-1 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                        </svg>
+                    </span>
+                </div>
+            </div>
+
+            {# === 뒷면: 요약 + 카테고리 + 링크 === #}
+            <div class="card-back bg-white shadow-sm border border-gray-100 flex flex-col">
+                {# 카테고리 태그 #}
+                {% if post.category_names %}
+                <div class="px-4 pt-3 pb-1 flex gap-1.5 flex-wrap">
+                    {% for cat in post.category_names %}
+                    <span class="text-[11px] px-2 py-0.5 rounded-full
+                        {% if cat == 'AI' %}bg-violet-100 text-violet-700
+                        {% elif cat == 'Semiconductor' %}bg-emerald-100 text-emerald-700
+                        {% elif cat == 'Cloud' %}bg-cyan-100 text-cyan-700
+                        {% elif cat == 'BigTech' %}bg-blue-100 text-blue-700
+                        {% elif cat == 'Startup' %}bg-pink-100 text-pink-700
+                        {% elif cat == 'Regulation' %}bg-red-100 text-red-700
+                        {% elif cat == 'Coding' %}bg-amber-100 text-amber-700
+                        {% else %}bg-gray-100 text-gray-600{% endif %}
+                    ">{{ cat }}</span>
+                    {% endfor %}
+                </div>
+                {% endif %}
+
+                {# 본문 요약 #}
+                <div class="flex-1 px-4 py-2 overflow-y-auto">
+                    {% if post.summary %}
+                    <p class="text-sm text-gray-800 leading-relaxed">{{ post.summary }}</p>
+                    {% else %}
+                    <p class="text-sm text-gray-600 leading-relaxed">{{ post.content_text[:300] }}</p>
+                    {% endif %}
+                </div>
+
+                {# 하단: 원문 링크 버튼 #}
+                <div class="px-4 py-2.5 border-t border-gray-50 flex items-center justify-between">
+                    <span class="text-xs text-gray-400 truncate max-w-[120px]">{{ post.author[:20] }}</span>
+                    {% if post.url %}
+                    <a href="{{ post.url }}" target="_blank" rel="noopener"
+                       onclick="event.stopPropagation()"
+                       class="inline-flex items-center gap-1 text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg transition-colors">
+                        원문 보기
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+                        </svg>
+                    </a>
+                    {% endif %}
+                </div>
+            </div>
         </div>
-
-        {% if post.summary %}
-        <p class="text-sm text-gray-800 mb-1">{{ post.summary }}</p>
-        <details class="text-xs text-gray-500">
-            <summary class="cursor-pointer hover:text-gray-700">원문 보기</summary>
-            <p class="mt-1 whitespace-pre-wrap">{{ post.content_text[:500] }}</p>
-        </details>
-        {% else %}
-        <p class="text-sm text-gray-700">{{ post.content_text[:300] }}</p>
-        {% endif %}
-
-        {% if post.category_names %}
-        <div class="flex gap-1 mt-2">
-            {% for cat in post.category_names %}
-            <span class="text-xs px-1.5 py-0.5 bg-gray-100 rounded text-gray-600">{{ cat }}</span>
-            {% endfor %}
-        </div>
-        {% endif %}
-
-        {% if post.url %}
-        <a href="{{ post.url }}" target="_blank" class="text-xs text-blue-500 hover:text-blue-700 mt-2 inline-block">
-            원문 링크 →
-        </a>
-        {% endif %}
     </div>
     {% endfor %}
 
     {% if not posts %}
-    <div class="bg-white rounded-lg shadow p-8 text-center text-gray-400">
+    <div class="lg:col-span-3 sm:col-span-2 bg-white rounded-xl shadow-sm border border-gray-100 p-12 text-center text-gray-400">
         조건에 맞는 게시물이 없습니다.
     </div>
     {% endif %}
@@ -108,11 +177,11 @@
 <div class="flex justify-center gap-4 mt-8">
     {% if page > 1 %}
     <a href="/posts?page={{ page - 1 }}&q={{ current_query or '' }}&source={{ current_source or '' }}&category={{ current_category or '' }}"
-       class="px-4 py-2 bg-white rounded shadow hover:bg-gray-50">← 이전</a>
+       class="px-5 py-2 bg-white rounded-lg shadow-sm border border-gray-100 hover:bg-gray-50 text-sm transition-colors">&larr; 이전</a>
     {% endif %}
     {% if posts|length >= 50 %}
     <a href="/posts?page={{ page + 1 }}&q={{ current_query or '' }}&source={{ current_source or '' }}&category={{ current_category or '' }}"
-       class="px-4 py-2 bg-white rounded shadow hover:bg-gray-50">다음 →</a>
+       class="px-5 py-2 bg-white rounded-lg shadow-sm border border-gray-100 hover:bg-gray-50 text-sm transition-colors">다음 &rarr;</a>
     {% endif %}
 </div>
 {% endblock %}
