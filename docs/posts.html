@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>게시물 탐색 - SNS Tech Briefing</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <!-- 네비게이션 -->
+    <nav class="bg-gray-900 text-white shadow-lg">
+        <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+            <a href="index.html" class="text-xl font-bold">SNS Tech Briefing</a>
+            <div class="flex gap-6 text-sm">
+                <a href="index.html" data-nav class="hover:text-blue-300">대시보드</a>
+                <a href="briefings.html" data-nav class="hover:text-blue-300">브리핑 아카이브</a>
+                <a href="posts.html" data-nav class="hover:text-blue-300">게시물 탐색</a>
+            </div>
+        </div>
+    </nav>
+
+    <main class="max-w-7xl mx-auto px-4 py-6">
+        <h1 class="text-2xl font-bold mb-4">게시물 탐색</h1>
+
+        <!-- 필터 바 -->
+        <div class="bg-white rounded-lg shadow p-4 mb-6">
+            <div class="flex flex-wrap gap-3 items-end">
+                <div class="flex-1 min-w-[200px]">
+                    <label class="text-xs text-gray-500 block mb-1">검색</label>
+                    <input type="text" id="search-input" placeholder="키워드 검색..."
+                           class="w-full border rounded px-3 py-2 text-sm">
+                </div>
+                <div>
+                    <label class="text-xs text-gray-500 block mb-1">소스</label>
+                    <select id="source-filter" class="border rounded px-3 py-2 text-sm">
+                        <option value="">전체</option>
+                        <option value="twitter">twitter</option>
+                        <option value="threads">threads</option>
+                        <option value="linkedin">linkedin</option>
+                        <option value="dcinside">dcinside</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="text-xs text-gray-500 block mb-1">카테고리</label>
+                    <select id="category-filter" class="border rounded px-3 py-2 text-sm">
+                        <option value="">전체</option>
+                    </select>
+                </div>
+                <button id="search-btn" class="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700">
+                    검색
+                </button>
+                <button id="reset-btn" class="text-gray-400 text-sm hover:text-gray-600 py-2">
+                    초기화
+                </button>
+            </div>
+        </div>
+
+        <!-- 게시물 목록 -->
+        <div id="posts-list" class="space-y-3">
+            <div class="flex justify-center items-center py-12">
+                <div class="spinner"></div>
+                <span class="ml-3 text-gray-400 text-sm">불러오는 중...</span>
+            </div>
+        </div>
+
+        <!-- 더 보기 버튼 -->
+        <div id="load-more-wrapper" class="flex justify-center mt-8 hidden">
+            <button id="load-more-btn" class="px-6 py-2 bg-white rounded shadow hover:bg-gray-50 text-sm text-gray-600">
+                더 보기
+            </button>
+        </div>
+    </main>
+
+    <footer class="text-center text-gray-400 text-xs py-4">
+        SNS Tech Briefing System v0.1.0 — GitHub Pages
+    </footer>
+
+    <script type="module">
+        import { getRecentPosts, getCategories } from './js/firestore-api.js';
+        import { renderPostCard, showError, showEmpty, setActiveNav, skeletonCards } from './js/app.js';
+
+        setActiveNav();
+
+        let lastDoc = null;
+        let isLoading = false;
+
+        const postsList = document.getElementById('posts-list');
+        const loadMoreWrapper = document.getElementById('load-more-wrapper');
+        const loadMoreBtn = document.getElementById('load-more-btn');
+        const searchInput = document.getElementById('search-input');
+        const sourceFilter = document.getElementById('source-filter');
+        const categoryFilter = document.getElementById('category-filter');
+        const searchBtn = document.getElementById('search-btn');
+        const resetBtn = document.getElementById('reset-btn');
+
+        // 카테고리 드롭다운 로드
+        async function loadCategories() {
+            try {
+                const categories = await getCategories();
+                categories.forEach(cat => {
+                    const opt = document.createElement('option');
+                    opt.value = cat.name;
+                    opt.textContent = `${cat.name_ko || cat.name} (${cat.name})`;
+                    categoryFilter.appendChild(opt);
+                });
+            } catch (e) {
+                console.error('Categories load error:', e);
+            }
+        }
+
+        // 게시물 로드
+        async function loadPosts(append = false) {
+            if (isLoading) return;
+            isLoading = true;
+
+            if (!append) {
+                postsList.innerHTML = skeletonCards(5);
+                lastDoc = null;
+            } else {
+                loadMoreBtn.textContent = '불러오는 중...';
+                loadMoreBtn.disabled = true;
+            }
+
+            try {
+                const opts = {
+                    source: sourceFilter.value || undefined,
+                    category: categoryFilter.value || undefined,
+                    searchQuery: searchInput.value.trim() || undefined,
+                    limitCount: 50,
+                    lastDoc: append ? lastDoc : null,
+                };
+
+                const result = await getRecentPosts(opts);
+                lastDoc = result.lastDoc;
+
+                if (result.posts.length === 0 && !append) {
+                    showEmpty('posts-list', '조건에 맞는 게시물이 없습니다.');
+                    loadMoreWrapper.classList.add('hidden');
+                    return;
+                }
+
+                const html = result.posts.map(renderPostCard).join('');
+
+                if (append) {
+                    postsList.insertAdjacentHTML('beforeend', html);
+                } else {
+                    postsList.innerHTML = html;
+                }
+
+                // Show/hide load more button
+                if (result.posts.length >= 50) {
+                    loadMoreWrapper.classList.remove('hidden');
+                } else {
+                    loadMoreWrapper.classList.add('hidden');
+                }
+            } catch (e) {
+                console.error('Posts load error:', e);
+                if (!append) {
+                    showError('posts-list', '게시물을 불러올 수 없습니다.');
+                }
+            } finally {
+                isLoading = false;
+                loadMoreBtn.textContent = '더 보기';
+                loadMoreBtn.disabled = false;
+            }
+        }
+
+        // 이벤트 핸들러
+        searchBtn.addEventListener('click', () => loadPosts(false));
+
+        searchInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') loadPosts(false);
+        });
+
+        resetBtn.addEventListener('click', () => {
+            searchInput.value = '';
+            sourceFilter.value = '';
+            categoryFilter.value = '';
+            loadPosts(false);
+        });
+
+        loadMoreBtn.addEventListener('click', () => loadPosts(true));
+
+        // 초기 로드
+        loadCategories();
+        loadPosts(false);
+    </script>
+</body>
+</html>

@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>브리핑 아카이브 - SNS Tech Briefing</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <!-- 네비게이션 -->
+    <nav class="bg-gray-900 text-white shadow-lg">
+        <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+            <a href="index.html" class="text-xl font-bold">SNS Tech Briefing</a>
+            <div class="flex gap-6 text-sm">
+                <a href="index.html" data-nav class="hover:text-blue-300">대시보드</a>
+                <a href="briefings.html" data-nav class="hover:text-blue-300">브리핑 아카이브</a>
+                <a href="posts.html" data-nav class="hover:text-blue-300">게시물 탐색</a>
+            </div>
+        </div>
+    </nav>
+
+    <main class="max-w-7xl mx-auto px-4 py-6">
+        <h1 class="text-2xl font-bold mb-6">브리핑 아카이브</h1>
+
+        <!-- 브리핑 목록 -->
+        <div id="briefings-list" class="space-y-4">
+            <div class="flex justify-center items-center py-12">
+                <div class="spinner"></div>
+                <span class="ml-3 text-gray-400 text-sm">불러오는 중...</span>
+            </div>
+        </div>
+
+        <!-- 브리핑 상세 모달 (같은 페이지 내) -->
+        <div id="briefing-detail" class="hidden mt-6">
+            <button id="back-to-list" class="text-blue-500 hover:text-blue-700 text-sm mb-4">← 목록으로 돌아가기</button>
+            <div class="bg-white rounded-lg shadow">
+                <div class="bg-gray-900 text-white px-6 py-4 rounded-t-lg">
+                    <h2 id="detail-title" class="text-xl font-bold"></h2>
+                    <div id="detail-meta" class="text-sm text-gray-400 mt-1"></div>
+                </div>
+                <div id="detail-content" class="p-6 briefing-content"></div>
+            </div>
+        </div>
+
+        <!-- 더 보기 버튼 -->
+        <div id="load-more-wrapper" class="flex justify-center mt-8 hidden">
+            <button id="load-more-btn" class="px-6 py-2 bg-white rounded shadow hover:bg-gray-50 text-sm text-gray-600">
+                더 보기
+            </button>
+        </div>
+    </main>
+
+    <footer class="text-center text-gray-400 text-xs py-4">
+        SNS Tech Briefing System v0.1.0 — GitHub Pages
+    </footer>
+
+    <script type="module">
+        import { getBriefings, getBriefingById } from './js/firestore-api.js';
+        import { formatTimestamp, escapeHtml, showError, showEmpty, setActiveNav } from './js/app.js';
+
+        setActiveNav();
+
+        let lastDoc = null;
+        let isLoading = false;
+
+        const briefingsList = document.getElementById('briefings-list');
+        const briefingDetail = document.getElementById('briefing-detail');
+        const loadMoreWrapper = document.getElementById('load-more-wrapper');
+        const loadMoreBtn = document.getElementById('load-more-btn');
+        const backToListBtn = document.getElementById('back-to-list');
+
+        function renderBriefingCard(b) {
+            const periodStart = formatTimestamp(b.period_start);
+            const periodEnd = formatTimestamp(b.period_end);
+            const emailBadge = b.email_sent
+                ? '<span class="text-green-500">이메일 전송됨</span>'
+                : '';
+
+            return `
+            <div class="bg-white rounded-lg shadow p-5 card-hover cursor-pointer" data-briefing-id="${escapeHtml(b.id)}">
+                <div class="flex justify-between items-center">
+                    <div>
+                        <h2 class="font-bold text-lg">${escapeHtml(b.title)}</h2>
+                        <div class="text-sm text-gray-500 mt-1">
+                            ${periodStart} ~ ${periodEnd}
+                        </div>
+                    </div>
+                    <div class="text-right">
+                        <div class="text-2xl font-bold text-blue-600">${b.total_items || 0}</div>
+                        <div class="text-xs text-gray-400">항목</div>
+                    </div>
+                </div>
+                <div class="flex gap-4 mt-3 text-xs text-gray-400">
+                    <span>분석: ${b.total_posts_analyzed || 0}건</span>
+                    ${emailBadge}
+                </div>
+            </div>`;
+        }
+
+        // 브리핑 목록 로드
+        async function loadBriefings(append = false) {
+            if (isLoading) return;
+            isLoading = true;
+
+            if (!append) {
+                lastDoc = null;
+            } else {
+                loadMoreBtn.textContent = '불러오는 중...';
+                loadMoreBtn.disabled = true;
+            }
+
+            try {
+                const result = await getBriefings(20, append ? lastDoc : null);
+                lastDoc = result.lastDoc;
+
+                if (result.briefings.length === 0 && !append) {
+                    showEmpty('briefings-list', '아직 생성된 브리핑이 없습니다.');
+                    loadMoreWrapper.classList.add('hidden');
+                    return;
+                }
+
+                const html = result.briefings.map(renderBriefingCard).join('');
+
+                if (append) {
+                    briefingsList.insertAdjacentHTML('beforeend', html);
+                } else {
+                    briefingsList.innerHTML = html;
+                }
+
+                // Show/hide load more
+                if (result.briefings.length >= 20) {
+                    loadMoreWrapper.classList.remove('hidden');
+                } else {
+                    loadMoreWrapper.classList.add('hidden');
+                }
+
+                // Attach click handlers
+                attachCardHandlers();
+            } catch (e) {
+                console.error('Briefings load error:', e);
+                if (!append) {
+                    showError('briefings-list', '브리핑 목록을 불러올 수 없습니다.');
+                }
+            } finally {
+                isLoading = false;
+                loadMoreBtn.textContent = '더 보기';
+                loadMoreBtn.disabled = false;
+            }
+        }
+
+        // 카드 클릭 핸들러 연결
+        function attachCardHandlers() {
+            briefingsList.querySelectorAll('[data-briefing-id]').forEach(card => {
+                card.addEventListener('click', () => showDetail(card.dataset.briefingId));
+            });
+        }
+
+        // 브리핑 상세 표시
+        async function showDetail(briefingId) {
+            briefingsList.classList.add('hidden');
+            loadMoreWrapper.classList.add('hidden');
+            briefingDetail.classList.remove('hidden');
+
+            const titleEl = document.getElementById('detail-title');
+            const metaEl = document.getElementById('detail-meta');
+            const contentEl = document.getElementById('detail-content');
+
+            contentEl.innerHTML = `
+                <div class="flex justify-center items-center py-8">
+                    <div class="spinner"></div>
+                    <span class="ml-3 text-gray-400 text-sm">불러오는 중...</span>
+                </div>`;
+
+            try {
+                const b = await getBriefingById(briefingId);
+
+                if (!b) {
+                    contentEl.innerHTML = `<p class="text-gray-400 text-center py-8">브리핑을 찾을 수 없습니다.</p>`;
+                    return;
+                }
+
+                titleEl.textContent = b.title || '';
+                const periodStart = formatTimestamp(b.period_start);
+                const periodEnd = formatTimestamp(b.period_end);
+                metaEl.textContent = `${periodStart} ~ ${periodEnd} | 분석: ${b.total_posts_analyzed || 0}건 → ${b.total_items || 0}개 항목`;
+
+                if (b.content_html) {
+                    contentEl.innerHTML = b.content_html;
+                } else if (b.content_text) {
+                    contentEl.innerHTML = `<pre class="whitespace-pre-wrap text-sm leading-relaxed">${escapeHtml(b.content_text)}</pre>`;
+                } else {
+                    contentEl.innerHTML = `<p class="text-gray-400">콘텐츠 없음</p>`;
+                }
+            } catch (e) {
+                console.error('Briefing detail error:', e);
+                contentEl.innerHTML = `
+                    <div class="bg-red-50 border border-red-200 rounded-lg p-4 text-center">
+                        <p class="text-red-600 text-sm">브리핑을 불러올 수 없습니다.</p>
+                    </div>`;
+            }
+        }
+
+        // 목록으로 돌아가기
+        backToListBtn.addEventListener('click', () => {
+            briefingDetail.classList.add('hidden');
+            briefingsList.classList.remove('hidden');
+            // Restore load more if needed
+            if (lastDoc) loadMoreWrapper.classList.remove('hidden');
+        });
+
+        loadMoreBtn.addEventListener('click', () => loadBriefings(true));
+
+        // URL hash로 직접 상세 보기 지원
+        const hash = window.location.hash.slice(1);
+        if (hash) {
+            showDetail(hash);
+        }
+
+        // 초기 로드
+        loadBriefings(false);
+    </script>
+</body>
+</html>

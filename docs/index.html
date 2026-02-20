@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>대시보드 - SNS Tech Briefing</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <!-- 네비게이션 -->
+    <nav class="bg-gray-900 text-white shadow-lg">
+        <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+            <a href="index.html" class="text-xl font-bold">SNS Tech Briefing</a>
+            <div class="flex gap-6 text-sm">
+                <a href="index.html" data-nav class="hover:text-blue-300">대시보드</a>
+                <a href="briefings.html" data-nav class="hover:text-blue-300">브리핑 아카이브</a>
+                <a href="posts.html" data-nav class="hover:text-blue-300">게시물 탐색</a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- 메인 콘텐츠 -->
+    <main class="max-w-7xl mx-auto px-4 py-6">
+        <!-- 수집 통계 카드 -->
+        <div id="stats-cards" class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+            <div class="bg-white rounded-lg shadow p-4 col-span-2 md:col-span-4 text-center">
+                <div class="flex justify-center items-center py-2">
+                    <div class="spinner"></div>
+                    <span class="ml-3 text-gray-400 text-sm">통계 불러오는 중...</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <!-- 최신 브리핑 (2/3 너비) -->
+            <div class="lg:col-span-2">
+                <div class="bg-white rounded-lg shadow">
+                    <div class="bg-gray-900 text-white px-6 py-4 rounded-t-lg">
+                        <h2 id="briefing-title" class="text-lg font-bold">최신 브리핑</h2>
+                    </div>
+                    <div id="briefing-content" class="p-6 briefing-content">
+                        <div class="flex justify-center items-center py-8">
+                            <div class="spinner"></div>
+                            <span class="ml-3 text-gray-400 text-sm">불러오는 중...</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 사이드바 (1/3 너비) -->
+            <div class="space-y-6">
+                <!-- 최근 수집 현황 -->
+                <div class="bg-white rounded-lg shadow p-4">
+                    <h3 class="font-bold text-gray-700 mb-3">최근 수집 현황</h3>
+                    <div id="recent-runs">
+                        <div class="flex justify-center py-4">
+                            <div class="spinner"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 최근 게시물 미리보기 -->
+                <div class="bg-white rounded-lg shadow p-4">
+                    <h3 class="font-bold text-gray-700 mb-3">최근 수집 게시물</h3>
+                    <div id="recent-posts">
+                        <div class="flex justify-center py-4">
+                            <div class="spinner"></div>
+                        </div>
+                    </div>
+                    <a href="posts.html" class="block text-center text-sm text-blue-500 hover:text-blue-700 mt-3">전체 보기 →</a>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <footer class="text-center text-gray-400 text-xs py-4">
+        SNS Tech Briefing System v0.1.0 — GitHub Pages
+    </footer>
+
+    <script type="module">
+        import { getSourceCounts24h, getLatestBriefing, getRecentPosts, getRecentRuns } from './js/firestore-api.js';
+        import { formatTimestamp, sourceBadge, escapeHtml, truncate, setActiveNav } from './js/app.js';
+
+        setActiveNav();
+
+        // 수집 통계 카드 로드
+        async function loadStats() {
+            try {
+                const counts = await getSourceCounts24h();
+                const container = document.getElementById('stats-cards');
+                const sources = Object.keys(counts);
+
+                if (sources.length === 0) {
+                    container.innerHTML = `
+                        <div class="bg-white rounded-lg shadow p-4 col-span-2 md:col-span-4 text-center text-gray-400">
+                            아직 수집된 데이터가 없습니다.
+                        </div>`;
+                    return;
+                }
+
+                container.innerHTML = sources.map(source => `
+                    <div class="bg-white rounded-lg shadow p-4">
+                        <div class="text-sm text-gray-500 uppercase">${escapeHtml(source)}</div>
+                        <div class="text-2xl font-bold mt-1">${counts[source]}</div>
+                        <div class="text-xs text-gray-400">최근 24시간</div>
+                    </div>
+                `).join('');
+            } catch (e) {
+                console.error('Stats load error:', e);
+                document.getElementById('stats-cards').innerHTML = `
+                    <div class="bg-red-50 border border-red-200 rounded-lg p-4 col-span-2 md:col-span-4 text-center">
+                        <p class="text-red-600 text-sm">통계를 불러올 수 없습니다.</p>
+                        <p class="text-red-400 text-xs mt-1">Firebase 설정을 확인해주세요.</p>
+                    </div>`;
+            }
+        }
+
+        // 최신 브리핑 로드
+        async function loadBriefing() {
+            try {
+                const briefing = await getLatestBriefing();
+                const titleEl = document.getElementById('briefing-title');
+                const contentEl = document.getElementById('briefing-content');
+
+                if (!briefing) {
+                    contentEl.innerHTML = `<p class="text-gray-400 text-center py-8">아직 생성된 브리핑이 없습니다.</p>`;
+                    return;
+                }
+
+                titleEl.textContent = briefing.title || '최신 브리핑';
+
+                if (briefing.content_html) {
+                    contentEl.innerHTML = briefing.content_html;
+                } else if (briefing.content_text) {
+                    contentEl.innerHTML = `<pre class="whitespace-pre-wrap text-sm">${escapeHtml(briefing.content_text)}</pre>`;
+                } else {
+                    contentEl.innerHTML = `<p class="text-gray-400 text-center py-8">콘텐츠 없음</p>`;
+                }
+            } catch (e) {
+                console.error('Briefing load error:', e);
+                document.getElementById('briefing-content').innerHTML = `
+                    <div class="bg-red-50 border border-red-200 rounded-lg p-4 text-center">
+                        <p class="text-red-600 text-sm">브리핑을 불러올 수 없습니다.</p>
+                    </div>`;
+            }
+        }
+
+        // 최근 수집 현황 로드
+        async function loadRuns() {
+            try {
+                const runs = await getRecentRuns(8);
+                const container = document.getElementById('recent-runs');
+
+                if (runs.length === 0) {
+                    container.innerHTML = `<p class="text-gray-400 text-sm text-center py-4">수집 기록 없음</p>`;
+                    return;
+                }
+
+                container.innerHTML = runs.map(run => {
+                    const time = formatTimestamp(run.started_at, 'time');
+                    const statusDot = run.status === 'success'
+                        ? 'bg-green-500'
+                        : run.status === 'failed' ? 'bg-red-500' : 'bg-yellow-500';
+
+                    return `
+                    <div class="flex justify-between items-center py-2 border-b border-gray-100 text-sm">
+                        <div>
+                            <span class="font-medium">${escapeHtml(run.source)}</span>
+                            <span class="text-gray-400 text-xs ml-1">${time}</span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span class="text-gray-600">${run.posts_collected || 0}건</span>
+                            <span class="w-2 h-2 ${statusDot} rounded-full"></span>
+                        </div>
+                    </div>`;
+                }).join('');
+            } catch (e) {
+                console.error('Runs load error:', e);
+                document.getElementById('recent-runs').innerHTML =
+                    `<p class="text-red-400 text-sm text-center py-4">불러오기 실패</p>`;
+            }
+        }
+
+        // 최근 게시물 미리보기 로드
+        async function loadRecentPosts() {
+            try {
+                const { posts } = await getRecentPosts({ limitCount: 10 });
+                const container = document.getElementById('recent-posts');
+
+                if (posts.length === 0) {
+                    container.innerHTML = `<p class="text-gray-400 text-sm text-center py-4">게시물 없음</p>`;
+                    return;
+                }
+
+                container.innerHTML = posts.map(post => `
+                    <div class="py-2 border-b border-gray-100">
+                        <div class="flex items-center gap-2 mb-1">
+                            <span class="text-xs px-1.5 py-0.5 bg-gray-100 rounded text-gray-600">${escapeHtml(post.source)}</span>
+                            <span class="text-xs text-gray-400">${escapeHtml(truncate(post.author || '', 20))}</span>
+                        </div>
+                        ${post.url
+                            ? `<a href="${escapeHtml(post.url)}" target="_blank" rel="noopener" class="text-sm text-gray-700 hover:text-blue-600 line-clamp-2">${escapeHtml(truncate(post.content_text, 100))}</a>`
+                            : `<p class="text-sm text-gray-700 line-clamp-2">${escapeHtml(truncate(post.content_text, 100))}</p>`
+                        }
+                    </div>
+                `).join('');
+            } catch (e) {
+                console.error('Posts load error:', e);
+                document.getElementById('recent-posts').innerHTML =
+                    `<p class="text-red-400 text-sm text-center py-4">불러오기 실패</p>`;
+            }
+        }
+
+        // 병렬 로드
+        Promise.all([loadStats(), loadBriefing(), loadRuns(), loadRecentPosts()]);
+    </script>
+</body>
+</html>
