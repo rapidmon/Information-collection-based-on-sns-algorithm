@@ -41,6 +41,7 @@ def _item_to_dict(item: BriefingItem) -> dict[str, Any]:
         "source_count": item.source_count,
         "sources_summary": item.sources_summary,
         "source_post_ids": item.source_post_ids,
+        "source_urls": item.source_urls,
     }
 
 
@@ -57,6 +58,7 @@ def _briefing_from_doc(doc) -> Briefing:
             source_count=i.get("source_count", 0),
             sources_summary=i.get("sources_summary", ""),
             source_post_ids=i.get("source_post_ids", []),
+            source_urls=i.get("source_urls", []),
         )
         for i in items_data
     ]

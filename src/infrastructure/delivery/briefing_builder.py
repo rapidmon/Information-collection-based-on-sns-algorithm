@@ -72,6 +72,7 @@ class DefaultBriefingGenerator:
                     source_count=len(topic.post_ids),
                     sources_summary=", ".join(sorted(set(topic.sources))),
                     source_post_ids=topic.post_ids,
+                    source_urls=topic.source_urls or [],
                 )
             )
 
@@ -118,7 +119,11 @@ class DefaultBriefingGenerator:
                 stars = _importance_to_stars(item.importance_score)
                 lines.append(f"**{item.headline}**")
                 lines.append(item.body)
-                lines.append(f"중요도: {stars} | 출처: {item.sources_summary}")
+                meta = f"중요도: {stars} | 출처: {item.sources_summary}"
+                lines.append(meta)
+                if item.source_urls:
+                    for url in item.source_urls:
+                        lines.append(f"  🔗 {url}")
                 lines.append("")
 
             lines.append("---")
@@ -156,11 +161,19 @@ class DefaultBriefingGenerator:
                     if line:
                         bullets_html += f'<div style="font-size:14px;line-height:1.7;color:#444;margin-bottom:4px;padding-left:16px;text-indent:-8px;">• {line}</div>\n'
 
+                links_html = ""
+                if item.source_urls:
+                    link_items = []
+                    for i, url in enumerate(item.source_urls, 1):
+                        link_items.append(f'<a href="{url}" style="color:#4a90d9;text-decoration:none;" target="_blank">[원문 {i}]</a>')
+                    links_html = f'<div style="font-size:12px;margin-top:6px;">{" ".join(link_items)}</div>'
+
                 items_html += f"""
                 <div style="margin-bottom:20px;padding:16px;background:#f8f9fa;border-radius:6px;border-left:4px solid #4a90d9;">
                     <div style="font-size:16px;font-weight:bold;margin-bottom:10px;color:#1a1a2e;">{item.headline}</div>
                     {bullets_html}
                     <div style="font-size:12px;color:#999;margin-top:10px;">중요도: {stars} | 출처: {item.sources_summary}</div>
+                    {links_html}
                 </div>"""
 
             cat_sections += f"""

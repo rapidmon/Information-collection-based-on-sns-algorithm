@@ -30,6 +30,11 @@ class MergedTopic:
     primary_category: str
     importance_score: float
     sources: list[str]
+    source_urls: list[str] = None
+
+    def __post_init__(self):
+        if self.source_urls is None:
+            self.source_urls = []
 
 
 class AIProcessor(Protocol):

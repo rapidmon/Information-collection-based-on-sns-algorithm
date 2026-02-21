@@ -20,6 +20,7 @@ class BriefingItem:
     source_count: int = 0
     sources_summary: str = ""
     source_post_ids: list[int] = field(default_factory=list)
+    source_urls: list[str] = field(default_factory=list)
 
 
 @dataclass

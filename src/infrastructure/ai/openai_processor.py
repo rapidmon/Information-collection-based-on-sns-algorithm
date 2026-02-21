@@ -43,6 +43,7 @@ def _posts_to_json(posts: list[Post]) -> str:
             "summary": p.summary,
             "categories": p.category_names,
             "importance_score": p.importance_score,
+            "url": p.url,
         })
     return json.dumps(items, ensure_ascii=False, indent=2)
 
@@ -187,6 +188,7 @@ class OpenAIProcessor:
                         primary_category=item.get("primary_category", "Other"),
                         importance_score=item.get("importance_score", 0.5),
                         sources=item.get("sources", []),
+                        source_urls=item.get("source_urls", []),
                     )
                 )
 
@@ -204,6 +206,7 @@ class OpenAIProcessor:
                     primary_category=p.category_names[0] if p.category_names else "Other",
                     importance_score=p.importance_score or 0.5,
                     sources=[p.source],
+                    source_urls=[p.url] if p.url else [],
                 )
                 for p in posts
             ]
