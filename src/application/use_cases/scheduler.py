@@ -6,7 +6,7 @@ APScheduler를 사용해 수집, AI 처리, 브리핑 생성/전달을 자동화
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -31,7 +31,8 @@ class Orchestrator:
         """모든 정기 작업을 등록."""
         configs = self._c.config.collectors
 
-        # ─── 수집 작업 ───
+        # ─── 수집 작업 (서버 시작 시 즉시 1회 실행 후 interval 반복) ───
+        now = datetime.now(tz=self._tz)
         for source, cfg in configs.items():
             if not cfg.enabled or source not in self._c.collectors:
                 continue
@@ -43,16 +44,18 @@ class Orchestrator:
                 name=f"Collect {source}",
                 max_instances=1,
                 misfire_grace_time=300,
+                next_run_time=now,  # 서버 시작 시 즉시 실행
             )
-            logger.info(f"수집 작업 등록: {source} (매 {cfg.interval_minutes}분)")
+            logger.info(f"수집 작업 등록: {source} (즉시 실행 + 매 {cfg.interval_minutes}분)")
 
-        # ─── AI 처리 (10분마다) ───
+        # ─── AI 처리 (10분마다, 시작 시 5분 후 첫 실행 — 수집 완료 대기) ───
         self.scheduler.add_job(
             self._run_processing,
             trigger=IntervalTrigger(minutes=10),
             id="process_posts",
             name="AI Process Posts",
             max_instances=1,
+            next_run_time=now + timedelta(minutes=5),
         )
 
         # ─── 일일 브리핑 ───
