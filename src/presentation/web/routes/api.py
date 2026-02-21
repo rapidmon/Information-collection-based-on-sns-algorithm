@@ -74,17 +74,24 @@ async def trigger_processing(request: Request):
 
 @router.post("/briefing/generate")
 async def trigger_briefing(request: Request):
-    """수동 브리핑 생성 트리거."""
+    """수동 브리핑 생성 + 이메일 발송 트리거."""
     c = _get_container(request)
     try:
         tz = ZoneInfo(c.config.timezone)
         now = datetime.now(tz=tz)
         gen_uc = c.generate_briefing_use_case()
         briefing = await gen_uc.execute(now - timedelta(hours=24), now)
+
+        email_sent = False
+        if briefing.total_items > 0:
+            send_uc = c.send_briefing_use_case()
+            email_sent = await send_uc.execute(briefing)
+
         return {
             "id": briefing.id,
             "title": briefing.title,
             "total_items": briefing.total_items,
+            "email_sent": email_sent,
         }
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})

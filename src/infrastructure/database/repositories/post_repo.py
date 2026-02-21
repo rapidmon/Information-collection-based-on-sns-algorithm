@@ -264,11 +264,17 @@ class FirestorePostRepository:
             query = (
                 self._col()
                 .where("is_relevant", "==", True)
-                .where("briefed_at", "==", None)
                 .order_by("collected_at", direction="DESCENDING")
-                .limit(limit)
             )
-            return [_post_from_doc(doc) for doc in query.stream()]
+            posts = []
+            for doc in query.stream():
+                d = doc.to_dict()
+                if d.get("briefed_at") is not None:
+                    continue
+                posts.append(_post_from_doc(doc))
+                if len(posts) >= limit:
+                    break
+            return posts
         return await asyncio.to_thread(_get)
 
     async def mark_briefed(self, post_ids: list[str], briefed_at: datetime) -> int:

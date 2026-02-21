@@ -33,7 +33,7 @@ class EmailNotifier:
         """브리핑을 이메일로 전송."""
         if not self._enabled:
             logger.info("이메일 비활성화 상태 — 전송 건너뜀")
-            return True
+            return False
 
         if not self._to_addresses:
             logger.warning("수신자 주소가 설정되지 않음")
