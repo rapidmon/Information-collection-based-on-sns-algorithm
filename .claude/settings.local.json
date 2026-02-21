@@ -12,7 +12,11 @@
       "Bash(git commit:*)",
       "Bash(sort:*)",
       "Bash(python:*)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(pip show:*)",
+      "Bash(python3 -m pip list:*)",
+      "Bash(py -m pip list:*)",
+      "Bash(py:*)"
     ]
   }
 }

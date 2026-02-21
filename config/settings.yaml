@@ -78,7 +78,7 @@ briefing:
 email:
   enabled: true
   to_addresses:
-    - "user@example.com"
+    - "ehhwll@hanmail.net"
 
 web:
   host: "0.0.0.0"

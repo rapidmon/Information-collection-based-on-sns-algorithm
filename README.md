@@ -56,7 +56,7 @@ FIREBASE_PROJECT_ID=your-project-id
 
 ```bash
 # Windows
-"C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222
+"C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222 --user-data-dir="C:\chrome_temp"
 ```
 
 Chrome이 열리면 **Twitter, Threads, LinkedIn에 로그인**해둡니다.
