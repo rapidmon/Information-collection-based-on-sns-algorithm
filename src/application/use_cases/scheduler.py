@@ -31,11 +31,14 @@ class Orchestrator:
         """모든 정기 작업을 등록."""
         configs = self._c.config.collectors
 
-        # ─── 수집 작업 (서버 시작 시 즉시 1회 실행 후 interval 반복) ───
+        # ─── 수집 작업 (서버 시작 시 순차 실행 후 interval 반복) ───
+        # CDP 수집기 동시 실행 방지: 2분 간격으로 stagger
         now = datetime.now(tz=self._tz)
+        stagger_minutes = 0
         for source, cfg in configs.items():
             if not cfg.enabled or source not in self._c.collectors:
                 continue
+            start_time = now + timedelta(minutes=stagger_minutes)
             self.scheduler.add_job(
                 self._run_collection,
                 trigger=IntervalTrigger(minutes=cfg.interval_minutes),
@@ -44,9 +47,13 @@ class Orchestrator:
                 name=f"Collect {source}",
                 max_instances=1,
                 misfire_grace_time=300,
-                next_run_time=now,  # 서버 시작 시 즉시 실행
+                next_run_time=start_time,
             )
-            logger.info(f"수집 작업 등록: {source} (즉시 실행 + 매 {cfg.interval_minutes}분)")
+            logger.info(
+                f"수집 작업 등록: {source} "
+                f"(+{stagger_minutes}분 후 시작, 매 {cfg.interval_minutes}분)"
+            )
+            stagger_minutes += 2
 
         # ─── AI 처리 (10분마다, 시작 시 5분 후 첫 실행 — 수집 완료 대기) ───
         self.scheduler.add_job(
@@ -99,9 +106,6 @@ class Orchestrator:
             )
         except SessionExpiredError as e:
             logger.error(f"[scheduler] {e}")
-            await self._c.notifier.send_alert(
-                f"{source} 세션 만료", str(e)
-            )
         except Exception as e:
             logger.error(f"[scheduler] 수집 오류 {source}: {e}")
 

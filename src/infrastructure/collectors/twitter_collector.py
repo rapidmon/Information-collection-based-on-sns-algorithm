@@ -15,7 +15,7 @@ from typing import Any, Optional
 from src.domain.entities import Post
 from src.domain.exceptions import SessionExpiredError
 from src.infrastructure.collectors.cdp import cdp_connection, check_session
-from src.infrastructure.config.settings import CollectorConfig
+from src.infrastructure.config.settings import CollectorConfig, SnsCredentials
 
 logger = logging.getLogger(__name__)
 
@@ -26,8 +26,14 @@ class TwitterCollector:
     FEED_URL = "https://x.com/home"
     TIMELINE_PATTERNS = ["HomeTimeline", "HomeLatestTimeline"]
 
-    def __init__(self, config: CollectorConfig, cdp_port: int = 9222):
+    def __init__(
+        self,
+        config: CollectorConfig,
+        credentials: SnsCredentials | None = None,
+        cdp_port: int = 9222,
+    ):
         self._config = config
+        self._credentials = credentials or SnsCredentials()
         self._cdp_url = f"http://127.0.0.1:{cdp_port}"
 
     @property
@@ -38,6 +44,50 @@ class TwitterCollector:
         return await check_session(
             self._cdp_url, "twitter", self.FEED_URL, ["login", "flow"]
         )
+
+    async def login(self) -> bool:
+        """CDP로 X(Twitter) 자동 로그인을 시도한다."""
+        if not self._credentials.is_configured:
+            logger.warning("[twitter] 자격증명 미설정 — 자동 로그인 불가")
+            return False
+
+        logger.info("[twitter] 자동 로그인 시도")
+        try:
+            async with cdp_connection(self._cdp_url, "twitter") as (pw, context):
+                page = await context.new_page()
+                try:
+                    await page.goto(
+                        "https://x.com/i/flow/login",
+                        wait_until="domcontentloaded",
+                        timeout=30000,
+                    )
+                    await page.wait_for_timeout(3000)
+
+                    # username 입력
+                    username_input = page.locator('input[autocomplete="username"]')
+                    await username_input.fill(self._credentials.username)
+                    await page.locator('button:has-text("Next"), button:has-text("다음")').click()
+                    await page.wait_for_timeout(2000)
+
+                    # password 입력
+                    password_input = page.locator('input[type="password"]')
+                    await password_input.fill(self._credentials.password)
+                    await page.locator(
+                        'button:has-text("Log in"), button:has-text("로그인")'
+                    ).click()
+                    await page.wait_for_timeout(5000)
+
+                    if "login" not in page.url and "flow" not in page.url:
+                        logger.info("[twitter] 자동 로그인 성공")
+                        return True
+
+                    logger.warning("[twitter] 자동 로그인 실패 — 로그인 페이지에 머무름")
+                    return False
+                finally:
+                    await page.close()
+        except Exception as e:
+            logger.error(f"[twitter] 자동 로그인 오류: {e}")
+            return False
 
     async def collect(self) -> list[Post]:
         """Chrome CDP로 연결하여 GraphQL 인터셉트 방식으로 타임라인을 수집한다."""

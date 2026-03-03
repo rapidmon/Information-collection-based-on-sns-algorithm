@@ -42,9 +42,17 @@ class CollectPostsUseCase:
         run = await self._run_repo.save(run)
 
         try:
-            # 세션 유효성 확인
+            # 세션 유효성 확인 → 실패 시 자동 로그인 시도
             if not await self._collector.is_session_valid():
-                raise SessionExpiredError(source)
+                if hasattr(self._collector, "login"):
+                    logger.info(f"[{source}] 세션 만료 — 자동 로그인 시도")
+                    login_ok = await self._collector.login()
+                    if login_ok and await self._collector.is_session_valid():
+                        logger.info(f"[{source}] 자동 로그인 후 세션 복구 성공")
+                    else:
+                        raise SessionExpiredError(source)
+                else:
+                    raise SessionExpiredError(source)
 
             # 재시도 로직으로 수집
             posts = await self._collect_with_retry()

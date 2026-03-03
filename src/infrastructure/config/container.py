@@ -15,7 +15,7 @@ from src.infrastructure.collectors.dcinside_collector import DCInsideCollector
 from src.infrastructure.collectors.linkedin_collector import LinkedInCollector
 from src.infrastructure.collectors.threads_collector import ThreadsCollector
 from src.infrastructure.collectors.twitter_collector import TwitterCollector
-from src.infrastructure.config.settings import AppConfig, Settings
+from src.infrastructure.config.settings import AppConfig, Settings, SnsCredentials
 from src.infrastructure.database.repositories.briefing_repo import FirestoreBriefingRepository
 from src.infrastructure.database.repositories.category_repo import FirestoreCategoryRepository
 from src.infrastructure.database.repositories.collection_run_repo import (
@@ -68,14 +68,26 @@ class Container:
         if "twitter" in collector_configs and collector_configs["twitter"].enabled:
             self.collectors["twitter"] = TwitterCollector(
                 config=collector_configs["twitter"],
+                credentials=SnsCredentials(
+                    self.settings.twitter_username,
+                    self.settings.twitter_password,
+                ),
             )
         if "threads" in collector_configs and collector_configs["threads"].enabled:
             self.collectors["threads"] = ThreadsCollector(
                 config=collector_configs["threads"],
+                credentials=SnsCredentials(
+                    self.settings.threads_username,
+                    self.settings.threads_password,
+                ),
             )
         if "linkedin" in collector_configs and collector_configs["linkedin"].enabled:
             self.collectors["linkedin"] = LinkedInCollector(
                 config=collector_configs["linkedin"],
+                credentials=SnsCredentials(
+                    self.settings.linkedin_email,
+                    self.settings.linkedin_password,
+                ),
             )
 
     # ─── Use Case 팩토리 ───

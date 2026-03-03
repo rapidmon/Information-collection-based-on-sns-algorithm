@@ -1,10 +1,24 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import yaml
 from pydantic_settings import BaseSettings
+
+
+# ──────────────────────────────────────────
+# SNS 자격증명
+# ──────────────────────────────────────────
+@dataclass
+class SnsCredentials:
+    username: str = ""
+    password: str = ""
+
+    @property
+    def is_configured(self) -> bool:
+        return bool(self.username and self.password)
 
 
 # ──────────────────────────────────────────
@@ -21,6 +35,14 @@ class Settings(BaseSettings):
     # Firebase
     firebase_credential_path: str = "firebase-service-account.json"
     firebase_project_id: str = ""
+
+    # SNS Credentials (auto-login)
+    twitter_username: str = ""
+    twitter_password: str = ""
+    threads_username: str = ""
+    threads_password: str = ""
+    linkedin_email: str = ""
+    linkedin_password: str = ""
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
