@@ -83,6 +83,7 @@ class ProcessingConfig:
         self.batch_size_categorize: int = data.get("batch_size_categorize", 20)
         self.use_batch_api: bool = data.get("use_batch_api", True)
         self.min_importance_for_briefing: float = data.get("min_importance_for_briefing", 0.4)
+        self.dedup_chunk_size: int = data.get("dedup_chunk_size", 80)
 
 
 class BriefingConfig:

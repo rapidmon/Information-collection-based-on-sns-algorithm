@@ -114,6 +114,7 @@ class Container:
             briefing_repo=self.briefing_repo,
             ai_processor=self.ai_processor,
             briefing_generator=self.briefing_generator,
+            processing_config=self.config.processing,
         )
 
     def send_briefing_use_case(self) -> SendBriefingUseCase:

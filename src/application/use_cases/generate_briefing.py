@@ -14,6 +14,7 @@ from src.domain.repositories.briefing_repository import BriefingRepository
 from src.domain.repositories.post_repository import PostRepository
 from src.domain.services.ai_processor import AIProcessor
 from src.domain.services.briefing_generator import BriefingGenerator
+from src.infrastructure.config.settings import ProcessingConfig
 
 logger = logging.getLogger(__name__)
 
@@ -25,11 +26,13 @@ class GenerateBriefingUseCase:
         briefing_repo: BriefingRepository,
         ai_processor: AIProcessor,
         briefing_generator: BriefingGenerator,
+        processing_config: ProcessingConfig,
     ):
         self._post_repo = post_repo
         self._briefing_repo = briefing_repo
         self._ai = ai_processor
         self._gen = briefing_generator
+        self._config = processing_config
 
     async def execute(self, period_start: datetime, period_end: datetime) -> Briefing:
         """미브리핑 게시물로 브리핑 생성."""
@@ -45,8 +48,15 @@ class GenerateBriefingUseCase:
 
         logger.info(f"브리핑 생성 시작: {len(posts)}건 미브리핑 게시물")
 
+        # 중요도 필터 적용 (dedup 전)
+        min_score = self._config.min_importance_for_briefing
+        posts_for_dedup = [p for p in posts if (p.importance_score or 0) >= min_score]
+        if not posts_for_dedup:
+            posts_for_dedup = posts  # 필터 후 빈 경우 전체 사용
+        logger.info(f"중요도 필터: {len(posts)}건 → {len(posts_for_dedup)}건 (최소 점수: {min_score})")
+
         # AI로 중복 제거 & 토픽 통합
-        merged_topics = await self._ai.deduplicate_and_merge(posts)
+        merged_topics = await self._ai.deduplicate_and_merge(posts_for_dedup)
 
         # 브리핑 문서 생성
         briefing = await self._gen.generate(

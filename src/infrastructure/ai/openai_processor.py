@@ -165,48 +165,51 @@ class OpenAIProcessor:
         return results
 
     async def deduplicate_and_merge(self, posts: list[Post]) -> list[MergedTopic]:
-        """중복 제거 + 토픽 통합 (GPT-4o 사용)."""
+        """중복 제거 + 토픽 통합 (GPT-4o 사용, 청킹)."""
         if not posts:
             return []
 
-        posts_json = _posts_to_json(posts)
-        prompt = DEDUPLICATE_AND_MERGE.format(posts_json=posts_json)
+        all_results: list[MergedTopic] = []
+        chunk_size = self._config.dedup_chunk_size
 
-        try:
-            response_text = self._call_api(
-                self._config.model_process, prompt, max_tokens=8192
-            )
-            parsed = _parse_json_response(response_text)
+        for i, chunk in enumerate(_chunked(posts, chunk_size)):
+            posts_json = _posts_to_json(chunk)
+            prompt = DEDUPLICATE_AND_MERGE.format(posts_json=posts_json)
 
-            results = []
-            for item in parsed:
-                results.append(
-                    MergedTopic(
-                        post_ids=item.get("post_ids", []),
-                        headline=item.get("headline", ""),
-                        body_bullets=item.get("body_bullets", []),
-                        primary_category=item.get("primary_category", "Other"),
-                        importance_score=item.get("importance_score", 0.5),
-                        sources=item.get("sources", []),
-                        source_urls=item.get("source_urls", []),
+            try:
+                response_text = self._call_api(
+                    self._config.model_process, prompt, max_tokens=16384
+                )
+                parsed = _parse_json_response(response_text)
+
+                for item in parsed:
+                    all_results.append(
+                        MergedTopic(
+                            post_ids=item.get("post_ids", []),
+                            headline=item.get("headline", ""),
+                            body_bullets=item.get("body_bullets", []),
+                            primary_category=item.get("primary_category", "Other"),
+                            importance_score=item.get("importance_score", 0.5),
+                            sources=item.get("sources", []),
+                            source_urls=item.get("source_urls", []),
+                        )
                     )
-                )
 
-            logger.info(f"중복제거/통합 완료: {len(posts)}건 → {len(results)}개 토픽")
-            return results
+            except Exception as e:
+                logger.error(f"청크 {i+1} 중복제거/통합 API 호출 실패: {e}")
+                # 실패 시 해당 청크의 각 게시물을 개별 토픽으로
+                for p in chunk:
+                    all_results.append(
+                        MergedTopic(
+                            post_ids=[p.id] if p.id else [],
+                            headline=p.summary or p.content_text[:100],
+                            body_bullets=[p.summary or p.content_text[:300]],
+                            primary_category=p.category_names[0] if p.category_names else "Other",
+                            importance_score=p.importance_score or 0.5,
+                            sources=[p.source],
+                            source_urls=[p.url] if p.url else [],
+                        )
+                    )
 
-        except Exception as e:
-            logger.error(f"중복제거/통합 API 호출 실패: {e}")
-            # 실패 시 각 게시물을 개별 토픽으로
-            return [
-                MergedTopic(
-                    post_ids=[p.id] if p.id else [],
-                    headline=p.summary or p.content_text[:100],
-                    body_bullets=[p.summary or p.content_text[:300]],
-                    primary_category=p.category_names[0] if p.category_names else "Other",
-                    importance_score=p.importance_score or 0.5,
-                    sources=[p.source],
-                    source_urls=[p.url] if p.url else [],
-                )
-                for p in posts
-            ]
+        logger.info(f"중복제거/통합 완료: {len(posts)}건 → {len(all_results)}개 토픽 ({(len(posts)-1)//chunk_size + 1}개 청크)")
+        return all_results

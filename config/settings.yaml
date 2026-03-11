@@ -24,7 +24,7 @@ collection:
     scroll_delay_max: 7.0
   dcinside:
     enabled: true
-    interval_minutes: 180
+    interval_minutes: 60
     gallery_id: "thesingularity"
     gallery_type: "mgallery"
     pages_to_scrape: 3
@@ -69,6 +69,7 @@ processing:
   batch_size_categorize: 20
   use_batch_api: true
   min_importance_for_briefing: 0.4
+  dedup_chunk_size: 80
 
 briefing:
   daily_time: "09:00"
