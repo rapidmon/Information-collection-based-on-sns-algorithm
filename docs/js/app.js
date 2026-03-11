@@ -1,13 +1,16 @@
 /**
- * SNS Tech Briefing - Common UI Utilities
+ * SNS Tech Briefing - Common UI Utilities (Dark SF Theme)
  */
 
-// Source badge color mapping
-const SOURCE_COLORS = {
-    twitter: 'bg-blue-100 text-blue-700',
-    threads: 'bg-purple-100 text-purple-700',
-    linkedin: 'bg-sky-100 text-sky-700',
-    dcinside: 'bg-gray-100 text-gray-700',
+// Category → badge class mapping
+const CATEGORY_BADGE = {
+    AI: 'badge-ai',
+    Semiconductor: 'badge-semiconductor',
+    Cloud: 'badge-cloud',
+    BigTech: 'badge-bigtech',
+    Startup: 'badge-startup',
+    Regulation: 'badge-regulation',
+    Coding: 'badge-coding',
 };
 
 /**
@@ -34,20 +37,7 @@ export function formatTimestamp(ts, format = 'datetime') {
  * 소스 배지 HTML 생성
  */
 export function sourceBadge(source) {
-    const color = SOURCE_COLORS[source] || 'bg-gray-100 text-gray-700';
-    return `<span class="text-xs px-2 py-0.5 rounded ${color}">${escapeHtml(source)}</span>`;
-}
-
-/**
- * 중요도 → 별점 표시
- */
-export function importanceStars(score) {
-    if (!score && score !== 0) return '';
-    if (score >= 0.9) return '★★★★★';
-    if (score >= 0.7) return '★★★★☆';
-    if (score >= 0.5) return '★★★☆☆';
-    if (score >= 0.3) return '★★☆☆☆';
-    return '★☆☆☆☆';
+    return `<span class="badge badge-${escapeHtml(source)}">${escapeHtml(source)}</span>`;
 }
 
 /**
@@ -77,7 +67,7 @@ export function showLoading(containerId) {
         el.innerHTML = `
             <div class="flex justify-center items-center py-12">
                 <div class="spinner"></div>
-                <span class="ml-3 text-gray-400 text-sm">불러오는 중...</span>
+                <span class="ml-3 text-sm" style="color: var(--text-muted);">불러오는 중...</span>
             </div>`;
     }
 }
@@ -89,9 +79,9 @@ export function showError(containerId, message) {
     const el = document.getElementById(containerId);
     if (el) {
         el.innerHTML = `
-            <div class="bg-red-50 border border-red-200 rounded-lg p-6 text-center">
-                <p class="text-red-600 text-sm">${escapeHtml(message)}</p>
-                <p class="text-red-400 text-xs mt-2">Firebase 설정을 확인해주세요.</p>
+            <div class="card p-6 text-center">
+                <p class="text-sm" style="color: var(--status-error);">${escapeHtml(message)}</p>
+                <p class="text-xs mt-2" style="color: var(--text-muted);">Firebase 설정을 확인해주세요.</p>
             </div>`;
     }
 }
@@ -103,39 +93,19 @@ export function showEmpty(containerId, message) {
     const el = document.getElementById(containerId);
     if (el) {
         el.innerHTML = `
-            <div class="bg-white rounded-lg shadow p-8 text-center text-gray-400">
+            <div class="card p-8 text-center" style="color: var(--text-muted);">
                 ${escapeHtml(message)}
             </div>`;
     }
 }
 
-// Category → color mapping
-const CATEGORY_COLORS = {
-    AI: 'bg-violet-100 text-violet-700',
-    Semiconductor: 'bg-emerald-100 text-emerald-700',
-    Cloud: 'bg-cyan-100 text-cyan-700',
-    BigTech: 'bg-blue-100 text-blue-700',
-    Startup: 'bg-pink-100 text-pink-700',
-    Regulation: 'bg-red-100 text-red-700',
-    Coding: 'bg-amber-100 text-amber-700',
-};
-
-// Keyword → color by position
-const KW_STYLES = [
-    'bg-blue-100 text-blue-800 text-base',
-    'bg-indigo-100 text-indigo-700 text-sm',
-    'bg-violet-100 text-violet-700 text-sm',
-    'bg-slate-100 text-slate-600 text-xs',
-    'bg-gray-100 text-gray-600 text-xs',
-];
-
-// Importance score badge color
+// Importance score badge
 function importanceBadge(score) {
     if (!score && score !== 0) return '';
-    let color = 'bg-gray-50 text-gray-500';
-    if (score >= 0.8) color = 'bg-red-50 text-red-600';
-    else if (score >= 0.6) color = 'bg-amber-50 text-amber-600';
-    return `<span class="text-xs font-bold px-2 py-0.5 rounded-full ${color}">${score.toFixed(1)}</span>`;
+    let cls = 'badge-importance-low';
+    if (score >= 0.8) cls = 'badge-importance-high';
+    else if (score >= 0.6) cls = 'badge-importance-mid';
+    return `<span class="badge ${cls}">${score.toFixed(1)}</span>`;
 }
 
 /**
@@ -143,22 +113,21 @@ function importanceBadge(score) {
  */
 export function renderPostCard(post) {
     const source = escapeHtml(post.source || '');
-    const sourceColor = SOURCE_COLORS[post.source] || 'bg-gray-100 text-gray-700';
     const author = escapeHtml(truncate(post.author || '', 20));
     const time = formatTimestamp(post.collected_at, 'short');
 
-    // 앞면: 키워드
+    // 앞면: 키워드 (ranked pills)
     const keywords = (post.keywords || []).slice(0, 5).map((kw, i) =>
-        `<span class="font-semibold px-3 py-1.5 rounded-lg ${KW_STYLES[i] || KW_STYLES[4]}">${escapeHtml(kw)}</span>`
+        `<span class="kw-pill kw-rank-${i + 1}">${escapeHtml(kw)}</span>`
     ).join('');
     const kwSection = keywords
         ? keywords
-        : '<p class="text-sm text-gray-400 italic">키워드 없음</p>';
+        : '<p class="text-sm italic" style="color: var(--text-muted);">키워드 없음</p>';
 
     // 뒷면: 카테고리
     const categories = (post.category_names || []).map(cat => {
-        const cc = CATEGORY_COLORS[cat] || 'bg-gray-100 text-gray-600';
-        return `<span class="text-[11px] px-2 py-0.5 rounded-full ${cc}">${escapeHtml(cat)}</span>`;
+        const cls = CATEGORY_BADGE[cat] || 'badge-default';
+        return `<span class="badge ${cls}">${escapeHtml(cat)}</span>`;
     }).join('');
 
     // 뒷면: 본문
@@ -170,7 +139,7 @@ export function renderPostCard(post) {
     const link = post.url
         ? `<a href="${escapeHtml(post.url)}" target="_blank" rel="noopener"
                onclick="event.stopPropagation()"
-               class="inline-flex items-center gap-1 text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg transition-colors">
+               class="btn-primary text-xs py-1 inline-flex items-center gap-1">
                원문 보기
                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
@@ -181,33 +150,33 @@ export function renderPostCard(post) {
     return `
     <div class="card-container cursor-pointer" onclick="this.querySelector('.card-inner').classList.toggle('flipped')">
         <div class="card-inner">
-            <!-- 앞면 -->
-            <div class="card-front bg-white shadow-sm border border-gray-100 flex flex-col">
+            <!-- 앞면: 키워드 + 소스 + 중요도 -->
+            <div class="card-front flex flex-col">
                 <div class="px-4 pt-3 pb-2 flex items-center justify-between">
-                    <span class="text-xs font-medium px-2 py-0.5 rounded-full ${sourceColor}">${source}</span>
+                    <span class="badge badge-${source}">${source}</span>
                     ${importanceBadge(post.importance_score)}
                 </div>
                 <div class="flex-1 px-4 py-3 flex flex-wrap content-center gap-2 justify-center">
                     ${kwSection}
                 </div>
-                <div class="px-4 py-2 border-t border-gray-50 flex items-center justify-between text-xs text-gray-400">
+                <div class="px-4 py-2 card-foot-divider flex items-center justify-between text-xs" style="color: var(--text-muted);">
                     <span class="truncate max-w-[120px]">${author}</span>
                     <span class="flex items-center gap-1">
                         ${time}
-                        <svg class="w-3.5 h-3.5 ml-1 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <svg class="w-3.5 h-3.5 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
                         </svg>
                     </span>
                 </div>
             </div>
-            <!-- 뒷면 -->
-            <div class="card-back bg-white shadow-sm border border-gray-100 flex flex-col">
+            <!-- 뒷면: 요약 + 카테고리 + 링크 -->
+            <div class="card-back flex flex-col">
                 ${categories ? `<div class="px-4 pt-3 pb-1 flex gap-1.5 flex-wrap">${categories}</div>` : ''}
                 <div class="flex-1 px-4 py-2 overflow-y-auto">
-                    <p class="text-sm text-gray-800 leading-relaxed">${body}</p>
+                    <p class="text-sm leading-relaxed" style="color: var(--text-secondary);">${body}</p>
                 </div>
-                <div class="px-4 py-2.5 border-t border-gray-50 flex items-center justify-between">
-                    <span class="text-xs text-gray-400 truncate max-w-[120px]">${author}</span>
+                <div class="px-4 py-2.5 card-foot-divider flex items-center justify-between">
+                    <span class="text-xs truncate max-w-[120px]" style="color: var(--text-muted);">${author}</span>
                     ${link}
                 </div>
             </div>
@@ -222,7 +191,7 @@ export function skeletonCards(count = 6) {
     return Array.from({ length: count }, () => `
         <div class="card-container">
             <div class="card-inner">
-                <div class="card-front bg-white shadow-sm border border-gray-100 flex flex-col rounded-xl p-4">
+                <div class="card-front flex flex-col rounded-xl p-4">
                     <div class="flex items-center justify-between mb-4">
                         <div class="skeleton w-16 h-5"></div>
                         <div class="skeleton w-10 h-5"></div>

@@ -7,33 +7,34 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="css/style.css">
 </head>
-<body class="bg-gray-50 min-h-screen">
+<body class="min-h-screen">
     <!-- 네비게이션 -->
-    <nav class="bg-gray-900 text-white shadow-lg">
+    <nav class="sticky top-0 z-50" style="backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); background: linear-gradient(180deg, rgba(15,15,13,0.9), rgba(15,15,13,0.7)); border-bottom: 2px solid rgba(0, 87, 255, 0.2); box-shadow: 0 0 30px rgba(0, 87, 255, 0.1), 0 8px 32px rgba(0, 0, 0, 0.3);">
+        <div style="position: absolute; top: 0; left: 0; right: 0; height: 1px; background: linear-gradient(90deg, transparent, rgba(0, 87, 255, 0.3), transparent);"></div>
         <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
-            <a href="index.html" class="text-xl font-bold">SNS Tech Briefing</a>
-            <div class="flex gap-6 text-sm">
-                <a href="index.html" data-nav class="hover:text-blue-300">대시보드</a>
-                <a href="briefings.html" data-nav class="hover:text-blue-300">브리핑 아카이브</a>
-                <a href="posts.html" data-nav class="hover:text-blue-300">게시물 탐색</a>
+            <a href="index.html" class="text-lg font-bold" style="color: var(--text-primary);">SNS Tech Briefing</a>
+            <div class="flex gap-8">
+                <a href="index.html" data-nav class="btn-ghost">대시보드</a>
+                <a href="briefings.html" data-nav class="btn-ghost">브리핑 아카이브</a>
+                <a href="posts.html" data-nav class="btn-ghost">게시물 탐색</a>
             </div>
         </div>
     </nav>
 
-    <main class="max-w-7xl mx-auto px-4 py-6">
-        <h1 class="text-2xl font-bold mb-4">게시물 탐색</h1>
+    <main class="max-w-7xl mx-auto px-4 py-8">
+        <h1 class="text-2xl font-bold mb-4" style="color: var(--text-primary);">게시물 탐색</h1>
 
         <!-- 필터 바 -->
-        <div class="bg-white rounded-lg shadow p-4 mb-6">
+        <div class="card p-4 mb-6">
             <div class="flex flex-wrap gap-3 items-end">
                 <div class="flex-1 min-w-[200px]">
-                    <label class="text-xs text-gray-500 block mb-1">검색</label>
+                    <label class="text-xs block mb-1" style="color: var(--text-muted);">검색</label>
                     <input type="text" id="search-input" placeholder="키워드 검색..."
-                           class="w-full border rounded px-3 py-2 text-sm">
+                           class="input-dark w-full">
                 </div>
                 <div>
-                    <label class="text-xs text-gray-500 block mb-1">소스</label>
-                    <select id="source-filter" class="border rounded px-3 py-2 text-sm">
+                    <label class="text-xs block mb-1" style="color: var(--text-muted);">소스</label>
+                    <select id="source-filter" class="input-dark">
                         <option value="">전체</option>
                         <option value="twitter">twitter</option>
                         <option value="threads">threads</option>
@@ -42,15 +43,15 @@
                     </select>
                 </div>
                 <div>
-                    <label class="text-xs text-gray-500 block mb-1">카테고리</label>
-                    <select id="category-filter" class="border rounded px-3 py-2 text-sm">
+                    <label class="text-xs block mb-1" style="color: var(--text-muted);">카테고리</label>
+                    <select id="category-filter" class="input-dark">
                         <option value="">전체</option>
                     </select>
                 </div>
-                <button id="search-btn" class="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700">
+                <button id="search-btn" class="btn-primary px-5 py-2">
                     검색
                 </button>
-                <button id="reset-btn" class="text-gray-400 text-sm hover:text-gray-600 py-2">
+                <button id="reset-btn" class="btn-ghost py-2" style="color: var(--text-secondary);">
                     초기화
                 </button>
             </div>
@@ -60,21 +61,35 @@
         <div id="posts-list" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             <div class="flex justify-center items-center py-12">
                 <div class="spinner"></div>
-                <span class="ml-3 text-gray-400 text-sm">불러오는 중...</span>
+                <span class="ml-3 text-sm" style="color: var(--text-muted);">불러오는 중...</span>
             </div>
         </div>
 
         <!-- 더 보기 버튼 -->
         <div id="load-more-wrapper" class="flex justify-center mt-8 hidden">
-            <button id="load-more-btn" class="px-6 py-2 bg-white rounded shadow hover:bg-gray-50 text-sm text-gray-600">
+            <button id="load-more-btn" class="btn-secondary px-6 py-2">
                 더 보기
             </button>
         </div>
     </main>
 
-    <footer class="text-center text-gray-400 text-xs py-4">
-        SNS Tech Briefing System v0.1.0 — GitHub Pages
+    <footer class="text-center text-xs py-6" style="color: var(--text-muted); border-top: 2px solid rgba(0, 87, 255, 0.2); background: linear-gradient(180deg, transparent, rgba(0, 87, 255, 0.05)); position: relative;">
+        <div style="position: absolute; top: 0; left: 0; right: 0; height: 1px; background: linear-gradient(90deg, transparent, rgba(0, 87, 255, 0.3), transparent);"></div>
+        SNS Tech Briefing System v0.1.0
     </footer>
+
+    <script>
+        document.addEventListener('scroll', () => {
+            const nav = document.querySelector('nav');
+            if (window.scrollY > 8) {
+                nav.style.background = 'linear-gradient(180deg, rgba(15,15,13,0.95), rgba(15,15,13,0.85))';
+                nav.style.boxShadow = '0 0 40px rgba(0, 87, 255, 0.15), 0 12px 40px rgba(0, 0, 0, 0.4)';
+            } else {
+                nav.style.background = 'linear-gradient(180deg, rgba(15,15,13,0.9), rgba(15,15,13,0.7))';
+                nav.style.boxShadow = '0 0 30px rgba(0, 87, 255, 0.1), 0 8px 32px rgba(0, 0, 0, 0.3)';
+            }
+        }, { passive: true });
+    </script>
 
     <script type="module">
         import { getRecentPosts, getCategories } from './js/firestore-api.js';
@@ -105,7 +120,7 @@
                     categoryFilter.appendChild(opt);
                 });
             } catch (e) {
-                console.error('Categories load error:', e);
+                // 카테고리 로드 실패 시 무시
             }
         }
 
@@ -148,14 +163,12 @@
                     postsList.innerHTML = html;
                 }
 
-                // Show/hide load more button
                 if (result.posts.length >= 50) {
                     loadMoreWrapper.classList.remove('hidden');
                 } else {
                     loadMoreWrapper.classList.add('hidden');
                 }
             } catch (e) {
-                console.error('Posts load error:', e);
                 if (!append) {
                     showError('posts-list', '게시물을 불러올 수 없습니다.');
                 }

@@ -7,37 +7,38 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="css/style.css">
 </head>
-<body class="bg-gray-50 min-h-screen">
+<body class="min-h-screen">
     <!-- 네비게이션 -->
-    <nav class="bg-gray-900 text-white shadow-lg">
+    <nav class="sticky top-0 z-50" style="backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); background: linear-gradient(180deg, rgba(15,15,13,0.9), rgba(15,15,13,0.7)); border-bottom: 2px solid rgba(0, 87, 255, 0.2); box-shadow: 0 0 30px rgba(0, 87, 255, 0.1), 0 8px 32px rgba(0, 0, 0, 0.3);">
+        <div style="position: absolute; top: 0; left: 0; right: 0; height: 1px; background: linear-gradient(90deg, transparent, rgba(0, 87, 255, 0.3), transparent);"></div>
         <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
-            <a href="index.html" class="text-xl font-bold">SNS Tech Briefing</a>
-            <div class="flex gap-6 text-sm">
-                <a href="index.html" data-nav class="hover:text-blue-300">대시보드</a>
-                <a href="briefings.html" data-nav class="hover:text-blue-300">브리핑 아카이브</a>
-                <a href="posts.html" data-nav class="hover:text-blue-300">게시물 탐색</a>
+            <a href="index.html" class="text-lg font-bold" style="color: var(--text-primary);">SNS Tech Briefing</a>
+            <div class="flex gap-8">
+                <a href="index.html" data-nav class="btn-ghost">대시보드</a>
+                <a href="briefings.html" data-nav class="btn-ghost">브리핑 아카이브</a>
+                <a href="posts.html" data-nav class="btn-ghost">게시물 탐색</a>
             </div>
         </div>
     </nav>
 
-    <main class="max-w-7xl mx-auto px-4 py-6">
-        <h1 class="text-2xl font-bold mb-6">브리핑 아카이브</h1>
+    <main class="max-w-7xl mx-auto px-4 py-8">
+        <h1 class="text-2xl font-bold mb-6" style="color: var(--text-primary);">브리핑 아카이브</h1>
 
         <!-- 브리핑 목록 -->
         <div id="briefings-list" class="space-y-4">
             <div class="flex justify-center items-center py-12">
                 <div class="spinner"></div>
-                <span class="ml-3 text-gray-400 text-sm">불러오는 중...</span>
+                <span class="ml-3 text-sm" style="color: var(--text-muted);">불러오는 중...</span>
             </div>
         </div>
 
         <!-- 브리핑 상세 모달 (같은 페이지 내) -->
         <div id="briefing-detail" class="hidden mt-6">
-            <button id="back-to-list" class="text-blue-500 hover:text-blue-700 text-sm mb-4">← 목록으로 돌아가기</button>
-            <div class="bg-white rounded-lg shadow">
-                <div class="bg-gray-900 text-white px-6 py-4 rounded-t-lg">
-                    <h2 id="detail-title" class="text-xl font-bold"></h2>
-                    <div id="detail-meta" class="text-sm text-gray-400 mt-1"></div>
+            <button id="back-to-list" class="text-sm transition-colors" style="color: var(--text-secondary);" onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--text-secondary)'">← 목록으로 돌아가기</button>
+            <div class="card overflow-hidden mt-4">
+                <div class="px-6 py-4" style="border-bottom: 1px solid var(--border);">
+                    <h2 id="detail-title" class="text-xl font-bold" style="color: var(--text-primary);"></h2>
+                    <div id="detail-meta" class="text-sm mt-1" style="color: var(--text-muted);"></div>
                 </div>
                 <div id="detail-content" class="p-6 briefing-content"></div>
             </div>
@@ -45,15 +46,29 @@
 
         <!-- 더 보기 버튼 -->
         <div id="load-more-wrapper" class="flex justify-center mt-8 hidden">
-            <button id="load-more-btn" class="px-6 py-2 bg-white rounded shadow hover:bg-gray-50 text-sm text-gray-600">
+            <button id="load-more-btn" class="btn-secondary px-6 py-2">
                 더 보기
             </button>
         </div>
     </main>
 
-    <footer class="text-center text-gray-400 text-xs py-4">
-        SNS Tech Briefing System v0.1.0 — GitHub Pages
+    <footer class="text-center text-xs py-6" style="color: var(--text-muted); border-top: 2px solid rgba(0, 87, 255, 0.2); background: linear-gradient(180deg, transparent, rgba(0, 87, 255, 0.05)); position: relative;">
+        <div style="position: absolute; top: 0; left: 0; right: 0; height: 1px; background: linear-gradient(90deg, transparent, rgba(0, 87, 255, 0.3), transparent);"></div>
+        SNS Tech Briefing System v0.1.0
     </footer>
+
+    <script>
+        document.addEventListener('scroll', () => {
+            const nav = document.querySelector('nav');
+            if (window.scrollY > 8) {
+                nav.style.background = 'linear-gradient(180deg, rgba(15,15,13,0.95), rgba(15,15,13,0.85))';
+                nav.style.boxShadow = '0 0 40px rgba(0, 87, 255, 0.15), 0 12px 40px rgba(0, 0, 0, 0.4)';
+            } else {
+                nav.style.background = 'linear-gradient(180deg, rgba(15,15,13,0.9), rgba(15,15,13,0.7))';
+                nav.style.boxShadow = '0 0 30px rgba(0, 87, 255, 0.1), 0 8px 32px rgba(0, 0, 0, 0.3)';
+            }
+        }, { passive: true });
+    </script>
 
     <script type="module">
         import { getBriefings, getBriefingById } from './js/firestore-api.js';
@@ -74,24 +89,24 @@
             const periodStart = formatTimestamp(b.period_start);
             const periodEnd = formatTimestamp(b.period_end);
             const emailBadge = b.email_sent
-                ? '<span class="text-green-500">이메일 전송됨</span>'
+                ? '<span class="badge badge-success">이메일 전송됨</span>'
                 : '';
 
             return `
-            <div class="bg-white rounded-lg shadow p-5 card-hover cursor-pointer" data-briefing-id="${escapeHtml(b.id)}">
+            <div class="card p-5 cursor-pointer transition-all" data-briefing-id="${escapeHtml(b.id)}" style="display: block;">
                 <div class="flex justify-between items-center">
                     <div>
-                        <h2 class="font-bold text-lg">${escapeHtml(b.title)}</h2>
-                        <div class="text-sm text-gray-500 mt-1">
+                        <h2 class="font-bold text-lg" style="color: var(--text-primary);">${escapeHtml(b.title)}</h2>
+                        <div class="text-sm mt-1" style="color: var(--text-muted);">
                             ${periodStart} ~ ${periodEnd}
                         </div>
                     </div>
                     <div class="text-right">
-                        <div class="text-2xl font-bold text-blue-600">${b.total_items || 0}</div>
-                        <div class="text-xs text-gray-400">항목</div>
+                        <div class="text-3xl font-bold stat-number">${b.total_items || 0}</div>
+                        <div class="text-xs" style="color: var(--text-muted);">항목</div>
                     </div>
                 </div>
-                <div class="flex gap-4 mt-3 text-xs text-gray-400">
+                <div class="flex gap-4 mt-3 text-xs" style="color: var(--text-muted);">
                     <span>분석: ${b.total_posts_analyzed || 0}건</span>
                     ${emailBadge}
                 </div>
@@ -128,17 +143,14 @@
                     briefingsList.innerHTML = html;
                 }
 
-                // Show/hide load more
                 if (result.briefings.length >= 20) {
                     loadMoreWrapper.classList.remove('hidden');
                 } else {
                     loadMoreWrapper.classList.add('hidden');
                 }
 
-                // Attach click handlers
                 attachCardHandlers();
             } catch (e) {
-                console.error('Briefings load error:', e);
                 if (!append) {
                     showError('briefings-list', '브리핑 목록을 불러올 수 없습니다.');
                 }
@@ -169,14 +181,14 @@
             contentEl.innerHTML = `
                 <div class="flex justify-center items-center py-8">
                     <div class="spinner"></div>
-                    <span class="ml-3 text-gray-400 text-sm">불러오는 중...</span>
+                    <span class="ml-3 text-sm" style="color: var(--text-muted);">불러오는 중...</span>
                 </div>`;
 
             try {
                 const b = await getBriefingById(briefingId);
 
                 if (!b) {
-                    contentEl.innerHTML = `<p class="text-gray-400 text-center py-8">브리핑을 찾을 수 없습니다.</p>`;
+                    contentEl.innerHTML = `<p class="text-center py-8" style="color: var(--text-muted);">브리핑을 찾을 수 없습니다.</p>`;
                     return;
                 }
 
@@ -188,15 +200,14 @@
                 if (b.content_html) {
                     contentEl.innerHTML = b.content_html;
                 } else if (b.content_text) {
-                    contentEl.innerHTML = `<pre class="whitespace-pre-wrap text-sm leading-relaxed">${escapeHtml(b.content_text)}</pre>`;
+                    contentEl.innerHTML = `<pre class="whitespace-pre-wrap text-sm leading-relaxed" style="font-family: inherit; color: var(--text-secondary);">${escapeHtml(b.content_text)}</pre>`;
                 } else {
-                    contentEl.innerHTML = `<p class="text-gray-400">콘텐츠 없음</p>`;
+                    contentEl.innerHTML = `<p style="color: var(--text-muted);">콘텐츠 없음</p>`;
                 }
             } catch (e) {
-                console.error('Briefing detail error:', e);
                 contentEl.innerHTML = `
-                    <div class="bg-red-50 border border-red-200 rounded-lg p-4 text-center">
-                        <p class="text-red-600 text-sm">브리핑을 불러올 수 없습니다.</p>
+                    <div class="card p-4 text-center">
+                        <p class="text-sm" style="color: var(--status-error);">브리핑을 불러올 수 없습니다.</p>
                     </div>`;
             }
         }
@@ -205,7 +216,6 @@
         backToListBtn.addEventListener('click', () => {
             briefingDetail.classList.add('hidden');
             briefingsList.classList.remove('hidden');
-            // Restore load more if needed
             if (lastDoc) loadMoreWrapper.classList.remove('hidden');
         });
 

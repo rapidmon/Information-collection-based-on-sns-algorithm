@@ -23,9 +23,7 @@ export async function getRecentPosts(opts = {}) {
         constraints.push(where('source', '==', source));
     }
 
-    if (category) {
-        constraints.push(where('category_names', 'array-contains', category));
-    }
+    // 카테고리는 클라이언트 사이드에서 필터링 (복합 인덱스 불필요)
 
     constraints.push(orderBy('collected_at', 'desc'));
 
@@ -33,12 +31,21 @@ export async function getRecentPosts(opts = {}) {
         constraints.push(startAfter(cursor));
     }
 
-    constraints.push(limit(limitCount));
+    // 카테고리 필터 시 더 많이 가져와서 클라이언트에서 필터링
+    const fetchCount = category ? limitCount * 3 : limitCount;
+    constraints.push(limit(fetchCount));
 
     const q = query(collection(db, 'posts'), ...constraints);
     const snapshot = await getDocs(q);
 
     let posts = snapshot.docs.map(d => ({ id: d.id, ...d.data(), _doc: d }));
+
+    // 클라이언트 사이드 카테고리 필터링
+    if (category) {
+        posts = posts.filter(p =>
+            (p.category_names || []).includes(category)
+        );
+    }
 
     // Client-side text search (Firestore doesn't support full-text search)
     if (searchQuery) {
@@ -109,11 +116,27 @@ export async function getBriefingById(briefingId) {
 
 /**
  * 카테고리 전체 조회
+ * Firestore categories 컬렉션이 비어있으면 기본 카테고리 반환
  */
+const DEFAULT_CATEGORIES = [
+    { name: 'AI', name_ko: 'AI' },
+    { name: 'Semiconductor', name_ko: '반도체' },
+    { name: 'Cloud', name_ko: '클라우드' },
+    { name: 'BigTech', name_ko: '빅테크' },
+    { name: 'Startup', name_ko: '스타트업' },
+    { name: 'Regulation', name_ko: '규제' },
+    { name: 'Coding', name_ko: '코딩' },
+];
+
 export async function getCategories() {
-    const q = query(collection(db, 'categories'));
-    const snapshot = await getDocs(q);
-    return snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+    try {
+        const q = query(collection(db, 'categories'));
+        const snapshot = await getDocs(q);
+        const categories = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+        return categories.length > 0 ? categories : DEFAULT_CATEGORIES;
+    } catch {
+        return DEFAULT_CATEGORIES;
+    }
 }
 
 /**
