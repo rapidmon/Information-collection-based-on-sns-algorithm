@@ -7,30 +7,537 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
     <style>
-        body { font-family: -apple-system, 'Malgun Gothic', 'Noto Sans KR', sans-serif; }
+        @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css');
+
+        :root {
+            --bg-base:        #0F0F0D;
+            --surface:        #1A1A18;
+            --surface-2:      #222220;
+            --surface-hover:  #272725;
+            --border:         #2A2A28;
+            --border-subtle:  #1F1F1D;
+            --text-primary:   #F0F0EE;
+            --text-secondary: #A8A8A6;
+            --text-muted:     #616160;
+            --accent:         #0057FF;
+            --accent-hover:   #0046CC;
+            --accent-dim:     rgba(0, 87, 255, 0.12);
+            --accent-glow:    rgba(0, 87, 255, 0.25);
+            --status-success: #22C55E;
+            --status-warning: #F59E0B;
+            --status-error:   #EF4444;
+            color-scheme: dark;
+        }
+
+        body {
+            font-family: 'Pretendard', -apple-system, 'Malgun Gothic', sans-serif;
+            background:
+                radial-gradient(ellipse at 20% 50%, rgba(0, 87, 255, 0.15) 0%, transparent 50%),
+                radial-gradient(ellipse at 80% 80%, rgba(0, 87, 255, 0.08) 0%, transparent 50%),
+                radial-gradient(ellipse at 100% 0%, rgba(0, 87, 255, 0.05) 0%, transparent 40%),
+                var(--bg-base);
+            color: var(--text-primary);
+            -webkit-font-smoothing: antialiased;
+            position: relative;
+        }
+
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background:
+                repeating-linear-gradient(
+                    0deg,
+                    rgba(0, 87, 255, 0.03) 0px,
+                    rgba(0, 87, 255, 0.03) 1px,
+                    transparent 1px,
+                    transparent 2px
+                );
+            pointer-events: none;
+            animation: scanlines 8s linear infinite;
+            z-index: 1;
+        }
+
+        @keyframes scanlines {
+            0% { transform: translateY(0); }
+            100% { transform: translateY(10px); }
+        }
+
+        main, nav, footer {
+            position: relative;
+            z-index: 2;
+        }
+
+        /* Common Component Classes */
+        .card {
+            background: rgba(26, 26, 24, 0.5);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(0, 87, 255, 0.25);
+            border-image: linear-gradient(135deg, rgba(0, 87, 255, 0.4) 0%, rgba(0, 87, 255, 0.1) 100%) 1;
+            border-radius: 0.75rem;
+            box-shadow:
+                0 8px 32px rgba(0, 0, 0, 0.3),
+                0 0 20px rgba(0, 87, 255, 0.1),
+                inset 0 1px 1px rgba(255, 255, 255, 0.1);
+            transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+            transform: translateZ(0);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(0, 87, 255, 0.1), transparent);
+            transition: left 0.5s;
+        }
+
+        .card:hover {
+            background: rgba(26, 26, 24, 0.7);
+            border-color: rgba(0, 87, 255, 0.5);
+            transform: translateY(-12px) scale(1.02);
+            box-shadow:
+                0 0 40px rgba(0, 87, 255, 0.3),
+                0 20px 50px rgba(0, 87, 255, 0.15),
+                inset 0 1px 1px rgba(255, 255, 255, 0.15);
+        }
+
+        .card:hover::before {
+            left: 100%;
+        }
+
+        .stat-number {
+            color: var(--accent);
+            text-shadow:
+                0 0 10px rgba(0, 87, 255, 0.6),
+                0 0 20px rgba(0, 87, 255, 0.4),
+                0 0 40px rgba(0, 87, 255, 0.2),
+                0 0 60px rgba(0, 87, 255, 0.1);
+            animation: neon-pulse 3s ease-in-out infinite;
+        }
+
+        @keyframes neon-pulse {
+            0%, 100% {
+                text-shadow:
+                    0 0 10px rgba(0, 87, 255, 0.6),
+                    0 0 20px rgba(0, 87, 255, 0.4),
+                    0 0 40px rgba(0, 87, 255, 0.2),
+                    0 0 60px rgba(0, 87, 255, 0.1);
+            }
+            50% {
+                text-shadow:
+                    0 0 15px rgba(0, 87, 255, 0.8),
+                    0 0 30px rgba(0, 87, 255, 0.6),
+                    0 0 50px rgba(0, 87, 255, 0.4),
+                    0 0 80px rgba(0, 87, 255, 0.2);
+            }
+        }
+
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            border-radius: 9999px;
+            padding: 0.35rem 0.85rem;
+            font-size: 0.75rem;
+            font-weight: 700;
+            border: 1px solid;
+            transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .badge::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: radial-gradient(circle at center, rgba(255, 255, 255, 0.1), transparent);
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            pointer-events: none;
+        }
+
+        .badge:hover {
+            transform: scale(1.1);
+            box-shadow:
+                0 0 12px currentColor,
+                0 0 24px currentColor,
+                inset 0 0 12px currentColor;
+        }
+
+        .badge:hover::after {
+            opacity: 1;
+        }
+
+        .badge-twitter { background: rgba(29, 155, 240, 0.12); color: #1D9BF0; border-color: rgba(29, 155, 240, 0.25); }
+        .badge-threads { background: rgba(168, 168, 168, 0.12); color: #A8A8A8; border-color: rgba(168, 168, 168, 0.25); }
+        .badge-linkedin { background: rgba(0, 162, 255, 0.12); color: #00A2FF; border-color: rgba(0, 162, 255, 0.25); }
+        .badge-dcinside { background: rgba(255, 127, 0, 0.12); color: #FF7F00; border-color: rgba(255, 127, 0, 0.25); }
+
+        .badge-ai { background: rgba(167, 139, 250, 0.12); color: #A78BFA; border-color: rgba(167, 139, 250, 0.25); }
+        .badge-semiconductor { background: rgba(34, 197, 94, 0.12); color: #22C55E; border-color: rgba(34, 197, 94, 0.25); }
+        .badge-cloud { background: rgba(6, 182, 212, 0.12); color: #06B6D4; border-color: rgba(6, 182, 212, 0.25); }
+        .badge-bigtech { background: rgba(59, 130, 246, 0.12); color: #3B82F6; border-color: rgba(59, 130, 246, 0.25); }
+        .badge-startup { background: rgba(236, 72, 153, 0.12); color: #EC4899; border-color: rgba(236, 72, 153, 0.25); }
+        .badge-regulation { background: rgba(239, 68, 68, 0.12); color: #EF4444; border-color: rgba(239, 68, 68, 0.25); }
+        .badge-coding { background: rgba(245, 158, 11, 0.12); color: #F59E0B; border-color: rgba(245, 158, 11, 0.25); }
+
+        .badge-success { background: rgba(34, 197, 94, 0.12); color: var(--status-success); border-color: rgba(34, 197, 94, 0.25); }
+        .badge-error { background: rgba(239, 68, 68, 0.12); color: var(--status-error); border-color: rgba(239, 68, 68, 0.25); }
+        .badge-warning { background: rgba(245, 158, 11, 0.12); color: var(--status-warning); border-color: rgba(245, 158, 11, 0.25); }
+
+        .badge-importance-high { background: rgba(239, 68, 68, 0.12); color: #EF4444; border-color: rgba(239, 68, 68, 0.25); }
+        .badge-importance-mid { background: rgba(245, 158, 11, 0.12); color: #F59E0B; border-color: rgba(245, 158, 11, 0.25); }
+        .badge-importance-low { background: rgba(107, 114, 128, 0.12); color: #6B7280; border-color: rgba(107, 114, 128, 0.25); }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 100%);
+            color: white;
+            border: 1px solid rgba(0, 87, 255, 0.5);
+            border-radius: 0.5rem;
+            padding: 0.625rem 1.25rem;
+            font-size: 0.875rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+            box-shadow:
+                0 0 15px rgba(0, 87, 255, 0.3),
+                inset 0 1px 0 rgba(255, 255, 255, 0.2);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .btn-primary::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 0;
+            height: 0;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.3);
+            transform: translate(-50%, -50%);
+            transition: width 0.6s, height 0.6s;
+        }
+
+        .btn-primary:hover {
+            background: linear-gradient(135deg, var(--accent-hover) 0%, var(--accent) 100%);
+            border-color: rgba(0, 87, 255, 0.9);
+            transform: scale(1.05);
+            box-shadow:
+                0 0 20px rgba(0, 87, 255, 0.5),
+                0 0 40px rgba(0, 87, 255, 0.3),
+                inset 0 1px 0 rgba(255, 255, 255, 0.3);
+        }
+
+        .btn-primary:active::before {
+            width: 300px;
+            height: 300px;
+        }
+
+        .btn-secondary {
+            background: transparent;
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+            border-radius: 0.375rem;
+            padding: 0.5rem 1rem;
+            font-size: 0.875rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .btn-secondary:hover {
+            background: var(--surface-hover);
+            border-color: var(--accent);
+        }
+
+        .btn-ghost {
+            background: transparent;
+            color: var(--text-secondary);
+            border: none;
+            padding: 0.5rem 1rem;
+            font-size: 0.875rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .btn-ghost:hover {
+            color: var(--accent);
+        }
+
+        .input-dark {
+            background: rgba(26, 26, 24, 0.5);
+            color: var(--text-primary);
+            border: 1px solid rgba(0, 87, 255, 0.2);
+            border-radius: 0.5rem;
+            padding: 0.75rem 1rem;
+            font-size: 0.875rem;
+            transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+            box-shadow:
+                inset 0 1px 2px rgba(0, 0, 0, 0.3),
+                0 0 0 2px transparent;
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+        }
+
+        .input-dark::placeholder {
+            color: var(--text-muted);
+        }
+
+        .input-dark:focus {
+            outline: none;
+            border-color: rgba(0, 87, 255, 0.8);
+            background: rgba(26, 26, 24, 0.8);
+            box-shadow:
+                inset 0 1px 2px rgba(0, 0, 0, 0.3),
+                0 0 0 3px rgba(0, 87, 255, 0.2),
+                0 0 20px rgba(0, 87, 255, 0.4),
+                0 0 40px rgba(0, 87, 255, 0.2);
+        }
+
+        .input-dark::placeholder {
+            color: var(--text-muted);
+        }
+
+        .table-dark {
+            width: 100%;
+            font-size: 0.875rem;
+            border-collapse: collapse;
+        }
+
+        .table-dark thead {
+            background:
+                linear-gradient(90deg, rgba(0, 87, 255, 0.1), rgba(0, 87, 255, 0.05)),
+                var(--surface-2);
+            color: var(--text-muted);
+            text-transform: uppercase;
+            font-size: 0.75rem;
+            font-weight: 700;
+            border-top: 1px solid rgba(0, 87, 255, 0.2);
+            border-bottom: 2px solid rgba(0, 87, 255, 0.3);
+        }
+
+        .table-dark thead th {
+            padding: 1rem 1.25rem;
+            text-align: left;
+            letter-spacing: 0.05em;
+        }
+
+        .table-dark tbody tr {
+            border-bottom: 1px solid var(--border-subtle);
+            transition: all 0.3s ease;
+            position: relative;
+        }
+
+        .table-dark tbody tr::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 2px;
+            background: linear-gradient(180deg, transparent, rgba(0, 87, 255, 0.3), transparent);
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .table-dark tbody tr:hover {
+            background:
+                linear-gradient(90deg, rgba(0, 87, 255, 0.1), transparent),
+                var(--surface-hover);
+            box-shadow: inset 0 0 20px rgba(0, 87, 255, 0.1);
+        }
+
+        .table-dark tbody tr:hover::before {
+            opacity: 1;
+        }
+
+        .table-dark td {
+            padding: 1rem 1.25rem;
+        }
+
+        .dot {
+            display: inline-block;
+            width: 0.6rem;
+            height: 0.6rem;
+            border-radius: 9999px;
+            animation: glow-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+            position: relative;
+        }
+
+        .dot::before {
+            content: '';
+            position: absolute;
+            inset: -4px;
+            border-radius: 9999px;
+            animation: glow-ring 3s ease-in-out infinite;
+        }
+
+        @keyframes glow-pulse {
+            0%, 100% {
+                opacity: 1;
+                transform: scale(1);
+            }
+            50% {
+                opacity: 0.7;
+                transform: scale(0.9);
+            }
+        }
+
+        @keyframes glow-ring {
+            0% {
+                box-shadow: 0 0 0 0 currentColor;
+                opacity: 1;
+            }
+            100% {
+                box-shadow: 0 0 0 8px currentColor;
+                opacity: 0;
+            }
+        }
+
+        .dot-success {
+            background: var(--status-success);
+            color: var(--status-success);
+            box-shadow:
+                0 0 10px var(--status-success),
+                0 0 20px var(--status-success),
+                0 0 30px rgba(34, 197, 94, 0.4);
+        }
+
+        .dot-error {
+            background: var(--status-error);
+            color: var(--status-error);
+            box-shadow:
+                0 0 10px var(--status-error),
+                0 0 20px var(--status-error),
+                0 0 30px rgba(239, 68, 68, 0.4);
+        }
+
+        .dot-warning {
+            background: var(--status-warning);
+            color: var(--status-warning);
+            box-shadow:
+                0 0 10px var(--status-warning),
+                0 0 20px var(--status-warning),
+                0 0 30px rgba(245, 158, 11, 0.4);
+        }
+
+        .briefing-content {
+            color: var(--text-primary);
+            line-height: 1.6;
+        }
+
+        .briefing-content h1:first-of-type,
+        .briefing-content h2:first-of-type {
+            display: none;
+        }
+
+        .briefing-content h1, .briefing-content h2, .briefing-content h3 {
+            color: var(--text-primary);
+            margin-top: 1rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .briefing-content p {
+            color: var(--text-secondary);
+            margin-bottom: 0.75rem;
+        }
+
+        .briefing-content a {
+            color: var(--text-secondary);
+            text-decoration: underline;
+            text-decoration-color: rgba(0, 87, 255, 0.3);
+            transition: all 0.2s ease;
+        }
+
+        .briefing-content a:hover {
+            color: var(--accent);
+            text-decoration-color: var(--accent);
+        }
+
+        /* 파란색 박스 제거 */
+        .briefing-content > div,
+        .briefing-content > blockquote {
+            background: transparent !important;
+            border: none !important;
+            box-shadow: none !important;
+            padding: 0 !important;
+            margin: 0 !important;
+        }
+
+        .briefing-content pre {
+            background: var(--surface-2);
+            border: 1px solid var(--border);
+            border-radius: 0.375rem;
+            padding: 1rem;
+            overflow-x: auto;
+            color: var(--text-secondary);
+        }
     </style>
 </head>
-<body class="bg-gray-50 min-h-screen">
+<body class="min-h-screen" style="background: var(--bg-base);">
     <!-- 네비게이션 -->
-    <nav class="bg-gray-900 text-white shadow-lg">
+    <nav class="sticky top-0 z-50 backdrop-filter backdrop-blur-[20px]" style="background: linear-gradient(180deg, rgba(15,15,13,0.9), rgba(15,15,13,0.7)); border-bottom: 2px solid rgba(0, 87, 255, 0.2); box-shadow: 0 0 30px rgba(0, 87, 255, 0.1), 0 8px 32px rgba(0, 0, 0, 0.3); position: relative;">
+        <div style="position: absolute; top: 0; left: 0; right: 0; height: 1px; background: linear-gradient(90deg, transparent, rgba(0, 87, 255, 0.3), transparent);"></div>
         <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
-            <a href="/" class="text-xl font-bold">SNS Tech Briefing</a>
-            <div class="flex gap-6 text-sm">
-                <a href="/" class="hover:text-blue-300">대시보드</a>
-                <a href="/briefings" class="hover:text-blue-300">브리핑 아카이브</a>
-                <a href="/posts" class="hover:text-blue-300">게시물 탐색</a>
-                <a href="/status" class="hover:text-blue-300">시스템 상태</a>
+            <a href="/" class="text-lg font-bold" style="color: var(--text-primary); transition: all 0.3s ease;" onmouseover="this.style.textShadow='0 0 20px rgba(0,87,255,0.5)'" onmouseout="this.style.textShadow='none'">SNS Tech Briefing</a>
+            <div class="flex gap-8">
+                <a href="/" class="btn-ghost" style="position: relative;">
+                    <span style="position: relative; z-index: 1;">대시보드</span>
+                    <span style="position: absolute; bottom: -2px; left: 0; right: 0; height: 2px; background: linear-gradient(90deg, var(--accent), transparent); opacity: 0; transition: opacity 0.3s ease;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0'"></span>
+                </a>
+                <a href="/briefings" class="btn-ghost" style="position: relative;">
+                    <span style="position: relative; z-index: 1;">브리핑 아카이브</span>
+                    <span style="position: absolute; bottom: -2px; left: 0; right: 0; height: 2px; background: linear-gradient(90deg, var(--accent), transparent); opacity: 0; transition: opacity 0.3s ease;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0'"></span>
+                </a>
+                <a href="/posts" class="btn-ghost" style="position: relative;">
+                    <span style="position: relative; z-index: 1;">게시물 탐색</span>
+                    <span style="position: absolute; bottom: -2px; left: 0; right: 0; height: 2px; background: linear-gradient(90deg, var(--accent), transparent); opacity: 0; transition: opacity 0.3s ease;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0'"></span>
+                </a>
+                <a href="/status" class="btn-ghost" style="position: relative;">
+                    <span style="position: relative; z-index: 1;">시스템 상태</span>
+                    <span style="position: absolute; bottom: -2px; left: 0; right: 0; height: 2px; background: linear-gradient(90deg, var(--accent), transparent); opacity: 0; transition: opacity 0.3s ease;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0'"></span>
+                </a>
             </div>
         </div>
     </nav>
 
     <!-- 메인 콘텐츠 -->
-    <main class="max-w-7xl mx-auto px-4 py-6">
+    <main class="max-w-7xl mx-auto px-4 py-8">
         {% block content %}{% endblock %}
     </main>
 
-    <footer class="text-center text-gray-400 text-xs py-4">
+    <footer class="text-center text-xs py-6" style="color: var(--text-muted); border-top: 2px solid rgba(0, 87, 255, 0.2); background: linear-gradient(180deg, transparent, rgba(0, 87, 255, 0.05)); position: relative;">
+        <div style="position: absolute; top: 0; left: 0; right: 0; height: 1px; background: linear-gradient(90deg, transparent, rgba(0, 87, 255, 0.3), transparent);"></div>
         SNS Tech Briefing System v0.1.0
     </footer>
+
+    <script>
+        document.addEventListener('scroll', () => {
+            const nav = document.querySelector('nav');
+            const scrollY = window.scrollY;
+
+            if (scrollY > 8) {
+                nav.style.background = 'linear-gradient(180deg, rgba(15,15,13,0.95), rgba(15,15,13,0.85))';
+                nav.style.boxShadow = '0 0 40px rgba(0, 87, 255, 0.15), 0 12px 40px rgba(0, 0, 0, 0.4)';
+            } else {
+                nav.style.background = 'linear-gradient(180deg, rgba(15,15,13,0.9), rgba(15,15,13,0.7))';
+                nav.style.boxShadow = '0 0 30px rgba(0, 87, 255, 0.1), 0 8px 32px rgba(0, 0, 0, 0.3)';
+            }
+        }, { passive: true });
+    </script>
 </body>
 </html>
