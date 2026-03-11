@@ -29,3 +29,6 @@ build/
 .idea/
 *.swp
 *.swo
+
+# Windows/MINGW64
+*.stackdump
