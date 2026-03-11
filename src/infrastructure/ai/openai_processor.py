@@ -48,6 +48,21 @@ def _posts_to_json(posts: list[Post]) -> str:
     return json.dumps(items, ensure_ascii=False, indent=2)
 
 
+def _posts_to_json_lite(posts: list[Post]) -> str:
+    """Post 리스트를 프롬프트에 삽입할 JSON 문자열로 변환 (요약 단계용, text 필드 제외)."""
+    items = []
+    for p in posts:
+        items.append({
+            "post_id": p.id,
+            "source": p.source,
+            "summary": p.summary,
+            "categories": p.category_names,
+            "importance_score": p.importance_score,
+            "url": p.url,
+        })
+    return json.dumps(items, ensure_ascii=False, indent=2)
+
+
 def _parse_json_response(text: str) -> list[dict[str, Any]]:
     """API 응답에서 JSON 배열을 추출."""
     text = text.strip()
@@ -136,7 +151,7 @@ class OpenAIProcessor:
         results: list[CategoryResult] = []
 
         for batch in _chunked(posts, self._config.batch_size_categorize):
-            posts_json = _posts_to_json(batch)
+            posts_json = _posts_to_json_lite(batch)
             prompt = CATEGORIZE.format(posts_json=posts_json)
 
             try:
@@ -173,7 +188,7 @@ class OpenAIProcessor:
         chunk_size = self._config.dedup_chunk_size
 
         for i, chunk in enumerate(_chunked(posts, chunk_size)):
-            posts_json = _posts_to_json(chunk)
+            posts_json = _posts_to_json_lite(chunk)
             prompt = DEDUPLICATE_AND_MERGE.format(posts_json=posts_json)
 
             try:

@@ -55,15 +55,17 @@ class Orchestrator:
             )
             stagger_minutes += 2
 
-        # ─── AI 처리 (10분마다, 시작 시 5분 후 첫 실행 — 수집 완료 대기) ───
+        # ─── AI 처리 (설정 간격마다, 시작 시 5분 후 첫 실행 — 수집 완료 대기) ───
+        processing_interval = self._c.config.processing.processing_interval_minutes
         self.scheduler.add_job(
             self._run_processing,
-            trigger=IntervalTrigger(minutes=10),
+            trigger=IntervalTrigger(minutes=processing_interval),
             id="process_posts",
             name="AI Process Posts",
             max_instances=1,
             next_run_time=now + timedelta(minutes=5),
         )
+        logger.info(f"AI 처리 작업 등록: 매 {processing_interval}분")
 
         # ─── 일일 브리핑 ───
         daily_time = self._c.config.briefing.daily_time
@@ -113,7 +115,8 @@ class Orchestrator:
         logger.info("[scheduler] AI 처리 시작")
         try:
             uc = self._c.process_posts_use_case()
-            stats = await uc.execute()
+            min_posts = self._c.config.processing.min_posts_to_process
+            stats = await uc.execute(min_posts_threshold=min_posts)
             logger.info(f"[scheduler] AI 처리 완료: {stats}")
         except Exception as e:
             logger.error(f"[scheduler] AI 처리 오류: {e}")

@@ -70,6 +70,8 @@ processing:
   use_batch_api: true
   min_importance_for_briefing: 0.4
   dedup_chunk_size: 80
+  processing_interval_minutes: 30
+  min_posts_to_process: 10
 
 briefing:
   daily_time: "09:00"

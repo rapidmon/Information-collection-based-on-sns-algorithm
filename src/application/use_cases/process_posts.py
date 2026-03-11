@@ -21,11 +21,17 @@ class ProcessPostsUseCase:
         self._post_repo = post_repo
         self._ai = ai_processor
 
-    async def execute(self, limit: int = 200) -> dict[str, int]:
+    async def execute(self, limit: int = 200, min_posts_threshold: int = 0) -> dict[str, int]:
         """미처리 게시물을 AI로 처리. 처리 통계를 반환."""
         posts = await self._post_repo.get_unprocessed(limit=limit)
         if not posts:
             logger.info("처리할 새 게시물 없음")
+            return {"total": 0, "relevant": 0, "filtered_out": 0, "deleted": 0}
+
+        if len(posts) < min_posts_threshold:
+            logger.info(
+                f"처리 건수 부족 ({len(posts)}건 < {min_posts_threshold}건), 스킵"
+            )
             return {"total": 0, "relevant": 0, "filtered_out": 0, "deleted": 0}
 
         logger.info(f"AI 처리 시작: {len(posts)}건")
