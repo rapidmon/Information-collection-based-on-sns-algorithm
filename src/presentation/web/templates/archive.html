@@ -6,31 +6,31 @@
 
 <div class="space-y-4">
     {% for b in briefings %}
-    <a href="/briefings/{{ b.id }}" class="block bg-white rounded-lg shadow p-5 hover:shadow-md transition-shadow">
+    <a href="/briefings/{{ b.id }}" class="card p-5 block transition-all hover:scale-[1.02]">
         <div class="flex justify-between items-center">
             <div>
-                <h2 class="font-bold text-lg">{{ b.title }}</h2>
-                <div class="text-sm text-gray-500 mt-1">
+                <h2 class="font-bold text-lg" style="color: var(--text-primary);">{{ b.title }}</h2>
+                <div class="text-sm mt-1" style="color: var(--text-muted);">
                     {{ b.period_start.strftime('%Y-%m-%d %H:%M') if b.period_start else '' }} ~
                     {{ b.period_end.strftime('%Y-%m-%d %H:%M') if b.period_end else '' }}
                 </div>
             </div>
             <div class="text-right">
-                <div class="text-2xl font-bold text-blue-600">{{ b.total_items or 0 }}</div>
-                <div class="text-xs text-gray-400">항목</div>
+                <div class="text-3xl font-bold stat-number">{{ b.total_items or 0 }}</div>
+                <div class="text-xs" style="color: var(--text-muted);">항목</div>
             </div>
         </div>
-        <div class="flex gap-4 mt-3 text-xs text-gray-400">
+        <div class="flex gap-4 mt-3 text-xs" style="color: var(--text-muted);">
             <span>분석: {{ b.total_posts_analyzed or 0 }}건</span>
             {% if b.email_sent %}
-            <span class="text-green-500">이메일 전송됨</span>
+            <span class="badge badge-success">이메일 전송됨</span>
             {% endif %}
         </div>
     </a>
     {% endfor %}
 
     {% if not briefings %}
-    <div class="bg-white rounded-lg shadow p-8 text-center text-gray-400">
+    <div class="card p-8 text-center" style="color: var(--text-muted);">
         아직 생성된 브리핑이 없습니다.
     </div>
     {% endif %}
@@ -39,11 +39,11 @@
 <!-- 페이지네이션 -->
 <div class="flex justify-center gap-4 mt-8">
     {% if page > 1 %}
-    <a href="/briefings?page={{ page - 1 }}" class="px-4 py-2 bg-white rounded shadow hover:bg-gray-50">← 이전</a>
+    <a href="/briefings?page={{ page - 1 }}" class="btn-secondary px-5 py-2">← 이전</a>
     {% endif %}
-    <span class="px-4 py-2 text-gray-500">{{ page }} 페이지</span>
+    <span class="px-4 py-2" style="color: var(--text-muted);">{{ page }} 페이지</span>
     {% if briefings|length >= 20 %}
-    <a href="/briefings?page={{ page + 1 }}" class="px-4 py-2 bg-white rounded shadow hover:bg-gray-50">다음 →</a>
+    <a href="/briefings?page={{ page + 1 }}" class="btn-secondary px-5 py-2">다음 →</a>
     {% endif %}
 </div>
 {% endblock %}
