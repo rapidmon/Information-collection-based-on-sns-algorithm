@@ -32,3 +32,6 @@ build/
 
 # Windows/MINGW64
 *.stackdump
+
+# Playwright MCP
+.playwright-mcp/

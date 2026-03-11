@@ -1,4 +1,4 @@
 ## Latest Session
-- Date: 2026-03-11
-- Summary: .claude/context/session-2026-03-11.md
-- Status: 프리미엄 다크 핀테크 UI 리디자인 완료 — Full SF 글래스모피즘 + 네온 그로우 + 3D 깊이감, 텍스트 링크 가독성 개선, 브리핑 패널 정리 완료, 커밋 대기
+- Date: 2026-03-12
+- Summary: .claude/context/session-2026-03-12.md
+- Status: GitHub Pages(docs/) Dark SF 테마 동기화 완료, 카테고리 필터 클라이언트 사이드 전환 수정, 커밋 완료(push 대기)

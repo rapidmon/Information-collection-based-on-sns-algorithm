@@ -24,7 +24,19 @@
       "Bash(grep -c \"class=\\\\\"badge\" src/presentation/web/templates/*.html | grep -v \":0\")",
       "Bash(grep -c \"briefing-content\" src/presentation/web/templates/*.html)",
       "Bash(pip install:*)",
-      "Bash(cd \"C:\\\\Users\\\\ehhwl\\\\Desktop\\\\private_project\\\\sns_algorithm_data_collection\" && rm -f preview.html bash.exe.stackdump && echo \"✅ 불필요한 파일 제거 완료\")"
+      "Bash(cd \"C:\\\\Users\\\\ehhwl\\\\Desktop\\\\private_project\\\\sns_algorithm_data_collection\" && rm -f preview.html bash.exe.stackdump && echo \"✅ 불필요한 파일 제거 완료\")",
+      "Bash(gh api repos/rapidmon/Information-collection-based-on-sns-algorithm/pages 2>/dev/null || echo \"Pages API 접근 실패\")",
+      "Bash(gh api repos/rapidmon/Information-collection-based-on-sns-algorithm/pages 2>&1)",
+      "WebFetch(domain:rapidmon.github.io)",
+      "Bash(cd /c/Users/Foryoucom/Desktop/coding/Information-collection-based-on-sns-algorithm/docs && npx -y serve . -p 3000)",
+      "mcp__playwright__browser_navigate",
+      "mcp__playwright__browser_console_messages",
+      "mcp__playwright__browser_click",
+      "mcp__playwright__browser_fill_form",
+      "mcp__playwright__browser_type",
+      "mcp__playwright__browser_wait_for",
+      "mcp__playwright__browser_snapshot",
+      "mcp__playwright__browser_select_option"
     ]
   }
 }
