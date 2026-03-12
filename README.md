@@ -150,9 +150,7 @@ LINKEDIN_PASSWORD=your-password
 
 ```bash
 # Windows
-"C:\Program Files\Google\Chrome\Application\chrome.exe" `
-  --remote-debugging-port=9222 `
-  --user-data-dir="C:\chrome_temp"
+"C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222 --user-data-dir="C:\chrome_temp"
 ```
 
 **Chrome 열리면 다음에 로그인:**

@@ -81,7 +81,6 @@ def init_sqlite_db() -> None:
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_source_is_relevant ON posts(source, is_relevant);")
 
     conn.commit()
-    conn.close()
 
 
 def _post_to_dict(post: Post) -> dict[str, Any]:
@@ -168,7 +167,7 @@ class PostRepositorySQLite:
              summary, importance_score, language, is_relevant, category_names,
              keywords, briefed_at, content_hash, dedup_cluster_id, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-        """, tuple(data.values()) + (datetime.now(),))
+        """, tuple(data.values()))
         conn.commit()
         return data["id"]
 
@@ -281,7 +280,7 @@ class PostRepositorySQLite:
                  summary, importance_score, language, is_relevant, category_names,
                  keywords, briefed_at, content_hash, dedup_cluster_id, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            """, tuple(data.values()) + (datetime.now(),))
+            """, tuple(data.values()))
             saved += 1
 
         conn.commit()

@@ -25,13 +25,16 @@ async def dashboard(request: Request):
     templates = _get_templates(request)
 
     latest_briefing = await c.briefing_repo.get_latest()
-    recent_posts = await c.post_repo.search(limit=30)
+    recent_posts = c.post_repo.find_recent(limit=30)
     recent_runs = await c.run_repo.get_recent(limit=10)
 
-    now = datetime.utcnow()
-    source_counts = await c.post_repo.count_by_source(
-        now - timedelta(hours=24), now
-    )
+    source_counts = {}  # SQLite는 아직 count_by_source 미구현
+    try:
+        for source in ["twitter", "threads", "linkedin"]:
+            posts = c.post_repo.find_by_source(source, limit=100)
+            source_counts[source] = len(posts)
+    except Exception:
+        pass
 
     return templates.TemplateResponse(
         "dashboard.html",

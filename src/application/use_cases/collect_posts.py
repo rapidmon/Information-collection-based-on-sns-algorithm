@@ -61,7 +61,7 @@ class CollectPostsUseCase:
             for post in posts:
                 post.content_hash = compute_content_hash(post.content_text)
 
-            saved_count = await self._post_repo.save_many(posts)
+            saved_count = self._post_repo.save_many(posts)
 
             run.status = "success"
             run.posts_collected = saved_count
