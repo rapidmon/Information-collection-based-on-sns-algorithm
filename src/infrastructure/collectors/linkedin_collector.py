@@ -9,11 +9,10 @@ import asyncio
 import logging
 import random
 from datetime import datetime
-from typing import Optional
 
 from src.domain.entities import Post
 from src.domain.exceptions import SessionExpiredError
-from src.infrastructure.collectors.cdp import cdp_connection, check_session
+from src.infrastructure.collectors.cdp import auto_login, cdp_connection, check_session
 from src.infrastructure.config.settings import CollectorConfig, SnsCredentials
 
 logger = logging.getLogger(__name__)
@@ -51,39 +50,19 @@ class LinkedInCollector:
             return False
 
         logger.info("[linkedin] 자동 로그인 시도")
-        try:
-            async with cdp_connection(self._cdp_url, "linkedin") as (pw, context):
-                page = await context.new_page()
-                try:
-                    await page.goto(
-                        "https://www.linkedin.com/login",
-                        wait_until="domcontentloaded",
-                        timeout=30000,
-                    )
-                    await page.wait_for_timeout(2000)
-
-                    await page.locator("#username").fill(self._credentials.username)
-                    await page.locator("#password").fill(self._credentials.password)
-                    await page.locator(
-                        'button[type="submit"], button:has-text("Sign in"), '
-                        'button:has-text("로그인")'
-                    ).first.click()
-                    await page.wait_for_timeout(5000)
-
-                    if not any(
-                        kw in page.url
-                        for kw in ["login", "authwall", "checkpoint"]
-                    ):
-                        logger.info("[linkedin] 자동 로그인 성공")
-                        return True
-
-                    logger.warning("[linkedin] 자동 로그인 실패 — 로그인 페이지에 머무름")
-                    return False
-                finally:
-                    await page.close()
-        except Exception as e:
-            logger.error(f"[linkedin] 자동 로그인 오류: {e}")
-            return False
+        return await auto_login(
+            cdp_url=self._cdp_url,
+            source_name="linkedin",
+            username=self._credentials.username,
+            password=self._credentials.password,
+            login_url="https://www.linkedin.com/login",
+            username_selector="#username",
+            password_selector="#password",
+            submit_selector='button[type="submit"], button:has-text("Sign in"), button:has-text("로그인")',
+            invalid_keywords=["login", "authwall", "checkpoint"],
+            initial_wait_ms=2000,
+            submit_wait_ms=5000,
+        )
 
     async def collect(self) -> list[Post]:
         """DOM 파싱으로 LinkedIn 피드를 수집."""
@@ -132,7 +111,7 @@ class LinkedInCollector:
             finally:
                 await page.close()
 
-    async def _parse_feed_update(self, element) -> Optional[Post]:
+    async def _parse_feed_update(self, element) -> Post | None:
         try:
             urn = await element.get_attribute("data-urn") or ""
             activity_id = ""
