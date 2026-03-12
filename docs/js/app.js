@@ -109,6 +109,24 @@ function importanceBadge(score) {
 }
 
 /**
+ * Highlight keywords in text with chip styling
+ */
+function highlightKeywords(text, keywords) {
+    if (!text || !keywords?.length) return escapeHtml(text || '');
+    let result = escapeHtml(text);
+    keywords.forEach((kw, i) => {
+        const escaped = escapeHtml(kw);
+        const rank = i + 1;
+        // case-insensitive replace, wrapping with chip span
+        result = result.replace(
+            new RegExp(escaped.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'),
+            `<span class="kw-pill kw-rank-${rank}">$&</span>`
+        );
+    });
+    return result;
+}
+
+/**
  * 게시물 플립 카드 HTML 생성
  */
 export function renderPostCard(post) {
@@ -116,13 +134,9 @@ export function renderPostCard(post) {
     const author = escapeHtml(truncate(post.author || '', 20));
     const time = formatTimestamp(post.collected_at, 'short');
 
-    // 앞면: 키워드 (ranked pills)
-    const keywords = (post.keywords || []).slice(0, 5).map((kw, i) =>
-        `<span class="kw-pill kw-rank-${i + 1}">${escapeHtml(kw)}</span>`
-    ).join('');
-    const kwSection = keywords
-        ? keywords
-        : '<p class="text-sm italic" style="color: var(--text-muted);">키워드 없음</p>';
+    // 앞면: 제목 (요약에서 키워드 하이라이트)
+    const titleText = truncate(post.summary || post.content_text || '', 80);
+    const titleHtml = highlightKeywords(titleText, post.keywords || []);
 
     // 뒷면: 카테고리
     const categories = (post.category_names || []).map(cat => {
@@ -135,9 +149,10 @@ export function renderPostCard(post) {
         ? escapeHtml(post.summary)
         : escapeHtml(truncate(post.content_text, 300));
 
-    // 뒷면: 원문 링크
-    const link = post.url
-        ? `<a href="${escapeHtml(post.url)}" target="_blank" rel="noopener"
+    // 뒷면: 원문 링크 (twitter.com → x.com 정규화)
+    const safeUrl = (post.url || '').replace('twitter.com', 'x.com');
+    const link = safeUrl
+        ? `<a href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer"
                onclick="event.stopPropagation()"
                class="btn-primary text-xs py-1 inline-flex items-center gap-1">
                원문 보기
@@ -150,14 +165,14 @@ export function renderPostCard(post) {
     return `
     <div class="card-container cursor-pointer" onclick="this.querySelector('.card-inner').classList.toggle('flipped')">
         <div class="card-inner">
-            <!-- 앞면: 키워드 + 소스 + 중요도 -->
+            <!-- 앞면: 제목 (키워드 인라인) + 소스 + 중요도 -->
             <div class="card-front flex flex-col">
                 <div class="px-4 pt-3 pb-2 flex items-center justify-between">
                     <span class="badge badge-${source}">${source}</span>
                     ${importanceBadge(post.importance_score)}
                 </div>
-                <div class="flex-1 px-4 py-3 flex flex-wrap content-center gap-2 justify-center">
-                    ${kwSection}
+                <div class="flex-1 px-4 py-3 flex flex-col justify-center">
+                    <p class="card-inline-title">${titleHtml}</p>
                 </div>
                 <div class="px-4 py-2 card-foot-divider flex items-center justify-between text-xs" style="color: var(--text-muted);">
                     <span class="truncate max-w-[120px]">${author}</span>

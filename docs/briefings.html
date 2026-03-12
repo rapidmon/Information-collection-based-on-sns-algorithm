@@ -199,6 +199,12 @@
 
                 if (b.content_html) {
                     contentEl.innerHTML = b.content_html;
+                    // Patch links to open in new tabs and normalize twitter.com → x.com
+                    contentEl.querySelectorAll('a').forEach(a => {
+                        a.target = '_blank';
+                        a.rel = 'noopener noreferrer';
+                        if (a.href.includes('twitter.com')) a.href = a.href.replace('twitter.com', 'x.com');
+                    });
                 } else if (b.content_text) {
                     contentEl.innerHTML = `<pre class="whitespace-pre-wrap text-sm leading-relaxed" style="font-family: inherit; color: var(--text-secondary);">${escapeHtml(b.content_text)}</pre>`;
                 } else {
