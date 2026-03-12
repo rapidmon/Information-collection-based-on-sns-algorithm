@@ -69,10 +69,10 @@ class ProcessPostsUseCase:
                     post.importance_score = cr.importance_score
                     post.keywords = cr.keywords or []
 
-        # 3. 관련 게시물만 DB 업데이트
-        for post in relevant_posts:
-            if post.id is not None:
-                await self._post_repo.update(post)
+        # 3. 관련 게시물만 DB 배치 업데이트 (성능 최적화)
+        updated = 0
+        if relevant_posts:
+            updated = await self._post_repo.update_many(relevant_posts)
 
         # 4. 관련 없는 게시물 삭제
         deleted = 0

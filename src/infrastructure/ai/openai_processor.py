@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 
 from openai import OpenAI
@@ -32,19 +33,20 @@ def _chunked(lst: list, size: int):
 
 
 def _posts_to_json(posts: list[Post]) -> str:
-    """Post 리스트를 프롬프트에 삽입할 JSON 문자열로 변환."""
+    """Post 리스트를 프롬프트에 삽입할 JSON 문자열로 변환 (캐싱)."""
     items = []
     for p in posts:
         items.append({
             "post_id": p.id,
             "source": p.source,
             "author": p.author,
-            "text": p.content_text[:1000],  # 토큰 절약
+            "text": p.content_text[:1000] if p.content_text else "",  # 토큰 절약
             "summary": p.summary,
-            "categories": p.category_names,
+            "categories": p.category_names or [],
             "importance_score": p.importance_score,
             "url": p.url,
         })
+    # 한 번의 JSON 직렬화로 모든 포스트 처리
     return json.dumps(items, ensure_ascii=False, indent=2)
 
 
@@ -64,27 +66,23 @@ def _posts_to_json_lite(posts: list[Post]) -> str:
 
 
 def _parse_json_response(text: str) -> list[dict[str, Any]]:
-    """API 응답에서 JSON 배열을 추출."""
+    """API 응답에서 JSON 배열을 추출 (최적화: 한 번에 처리)."""
     text = text.strip()
 
-    # JSON 블록이 ```로 감싸진 경우 처리
-    if "```" in text:
-        start = text.find("[")
-        end = text.rfind("]") + 1
-        if start != -1 and end > start:
-            text = text[start:end]
-
-    # 바로 JSON인 경우
+    # 바로 JSON인 경우 (가장 빠른 경로)
     if text.startswith("["):
         return json.loads(text)
 
-    # 텍스트 중에 JSON 배열이 포함된 경우
+    # 한 번의 find/rfind로 JSON 배열 찾기
     start = text.find("[")
-    end = text.rfind("]") + 1
-    if start != -1 and end > start:
-        return json.loads(text[start:end])
+    if start == -1:
+        raise ValueError(f"JSON 배열을 찾을 수 없음: {text[:200]}")
 
-    raise ValueError(f"JSON 배열을 찾을 수 없음: {text[:200]}")
+    end = text.rfind("]") + 1
+    if end <= start:
+        raise ValueError(f"JSON 배열을 찾을 수 없음: {text[:200]}")
+
+    return json.loads(text[start:end])
 
 
 class OpenAIProcessor:

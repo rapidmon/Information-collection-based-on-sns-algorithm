@@ -7,6 +7,7 @@ Firestore 대신 파일 기반 데이터베이스 사용 (비용 $0).
 from __future__ import annotations
 
 import sqlite3
+import threading
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -16,12 +17,23 @@ from src.domain.entities import Post
 
 DB_PATH = Path("data/posts.db")
 
+# SQLite 연결 풀 (스레드 로컬 저장소)
+_thread_local = threading.local()
+
+
+def _get_db() -> sqlite3.Connection:
+    """스레드 로컬 SQLite 연결 획득 (연결 풀)."""
+    if not hasattr(_thread_local, 'db') or _thread_local.db is None:
+        _thread_local.db = sqlite3.connect(DB_PATH, check_same_thread=False)
+        _thread_local.db.row_factory = sqlite3.Row
+    return _thread_local.db
+
 
 def init_sqlite_db() -> None:
     """SQLite 데이터베이스 초기화 및 스키마 생성."""
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = _get_db()
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
@@ -65,6 +77,8 @@ def init_sqlite_db() -> None:
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_collected_at ON posts(collected_at);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_source ON posts(source);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_external_id ON posts(external_id);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_is_relevant ON posts(is_relevant);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_source_is_relevant ON posts(source, is_relevant);")
 
     conn.commit()
     conn.close()
@@ -142,11 +156,123 @@ class PostRepositorySQLite:
 
     def save(self, post: Post) -> str:
         """Post 저장 (신규 또는 업데이트)."""
-        conn = sqlite3.connect(DB_PATH)
+        conn = _get_db()
         cursor = conn.cursor()
         data = _post_to_dict(post)
 
-        try:
+        cursor.execute("""
+            INSERT OR REPLACE INTO posts
+            (id, source, external_id, url, author, author_url, content_text,
+             content_html, media_urls, engagement_likes, engagement_reposts,
+             engagement_comments, engagement_views, published_at, collected_at,
+             summary, importance_score, language, is_relevant, category_names,
+             keywords, briefed_at, content_hash, dedup_cluster_id, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        """, tuple(data.values()) + (datetime.now(),))
+        conn.commit()
+        return data["id"]
+
+    def find_by_id(self, post_id: str) -> Post | None:
+        """ID로 Post 조회."""
+        conn = _get_db()
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT * FROM posts WHERE id = ?", (post_id,))
+        row = cursor.fetchone()
+        return _post_from_row(row) if row else None
+
+    def find_by_external_id(self, external_id: str) -> Post | None:
+        """external_id로 Post 조회."""
+        return self.find_by_id(external_id)
+
+    def find_recent(self, limit: int = 100) -> list[Post]:
+        """최근 Post 조회."""
+        conn = _get_db()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT * FROM posts
+            ORDER BY collected_at DESC
+            LIMIT ?
+        """, (limit,))
+        return [_post_from_row(row) for row in cursor.fetchall()]
+
+    def find_by_source(self, source: str, limit: int = 100) -> list[Post]:
+        """소스별 Post 조회."""
+        conn = _get_db()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT * FROM posts
+            WHERE source = ?
+            ORDER BY collected_at DESC
+            LIMIT ?
+        """, (source, limit))
+        return [_post_from_row(row) for row in cursor.fetchall()]
+
+    def delete(self, post_id: str) -> None:
+        """Post 삭제."""
+        conn = _get_db()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM posts WHERE id = ?", (post_id,))
+        conn.commit()
+
+    def update_many(self, posts: list[Post]) -> int:
+        """여러 Post를 한 번에 업데이트 (배치 처리, 성능 최적화)."""
+        conn = _get_db()
+        cursor = conn.cursor()
+        updated = 0
+
+        for post in posts:
+            if post.id is None:
+                continue
+            data = _post_to_dict(post)
+            cursor.execute("""
+                UPDATE posts SET
+                    summary = ?, importance_score = ?, language = ?,
+                    is_relevant = ?, category_names = ?, keywords = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (
+                post.summary, post.importance_score, post.language,
+                1 if post.is_relevant else 0,
+                data["category_names"], data["keywords"],
+                post.id
+            ))
+            updated += cursor.rowcount
+
+        conn.commit()
+        return updated
+
+    def delete_older_than(self, days: int) -> int:
+        """N일 이상 된 Post 삭제 (자동 정리용)."""
+        cutoff_date = datetime.now() - timedelta(days=days)
+        conn = _get_db()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            "DELETE FROM posts WHERE collected_at < ?",
+            (cutoff_date,)
+        )
+        conn.commit()
+        return cursor.rowcount
+
+    def count(self) -> int:
+        """전체 Post 수."""
+        conn = _get_db()
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT COUNT(*) FROM posts")
+        return cursor.fetchone()[0]
+
+    def save_many(self, posts: list[Post]) -> int:
+        """여러 Post 일괄 저장 (배치 처리, 성능 최적화)."""
+        conn = _get_db()
+        cursor = conn.cursor()
+        saved = 0
+
+        for post in posts:
+            data = _post_to_dict(post)
             cursor.execute("""
                 INSERT OR REPLACE INTO posts
                 (id, source, external_id, url, author, author_url, content_text,
@@ -156,98 +282,23 @@ class PostRepositorySQLite:
                  keywords, briefed_at, content_hash, dedup_cluster_id, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             """, tuple(data.values()) + (datetime.now(),))
-            conn.commit()
-            return data["id"]
-        finally:
-            conn.close()
+            saved += 1
 
-    def find_by_id(self, post_id: str) -> Post | None:
-        """ID로 Post 조회."""
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
+        conn.commit()
+        return saved
+
+    def get_unprocessed(self, limit: int = 100) -> list[Post]:
+        """AI 처리 안 된 게시물 조회 (summary가 None)."""
+        conn = _get_db()
         cursor = conn.cursor()
 
-        try:
-            cursor.execute("SELECT * FROM posts WHERE id = ?", (post_id,))
-            row = cursor.fetchone()
-            return _post_from_row(row) if row else None
-        finally:
-            conn.close()
-
-    def find_by_external_id(self, external_id: str) -> Post | None:
-        """external_id로 Post 조회."""
-        return self.find_by_id(external_id)
-
-    def find_recent(self, limit: int = 100) -> list[Post]:
-        """최근 Post 조회."""
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-
-        try:
-            cursor.execute("""
-                SELECT * FROM posts
-                ORDER BY collected_at DESC
-                LIMIT ?
-            """, (limit,))
-            return [_post_from_row(row) for row in cursor.fetchall()]
-        finally:
-            conn.close()
-
-    def find_by_source(self, source: str, limit: int = 100) -> list[Post]:
-        """소스별 Post 조회."""
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-
-        try:
-            cursor.execute("""
-                SELECT * FROM posts
-                WHERE source = ?
-                ORDER BY collected_at DESC
-                LIMIT ?
-            """, (source, limit))
-            return [_post_from_row(row) for row in cursor.fetchall()]
-        finally:
-            conn.close()
-
-    def delete(self, post_id: str) -> None:
-        """Post 삭제."""
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-
-        try:
-            cursor.execute("DELETE FROM posts WHERE id = ?", (post_id,))
-            conn.commit()
-        finally:
-            conn.close()
-
-    def delete_older_than(self, days: int) -> int:
-        """N일 이상 된 Post 삭제 (자동 정리용)."""
-        cutoff_date = datetime.now() - timedelta(days=days)
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-
-        try:
-            cursor.execute(
-                "DELETE FROM posts WHERE collected_at < ?",
-                (cutoff_date,)
-            )
-            conn.commit()
-            return cursor.rowcount
-        finally:
-            conn.close()
-
-    def count(self) -> int:
-        """전체 Post 수."""
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-
-        try:
-            cursor.execute("SELECT COUNT(*) FROM posts")
-            return cursor.fetchone()[0]
-        finally:
-            conn.close()
+        cursor.execute("""
+            SELECT * FROM posts
+            WHERE summary IS NULL
+            ORDER BY collected_at ASC
+            LIMIT ?
+        """, (limit,))
+        return [_post_from_row(row) for row in cursor.fetchall()]
 
     def get_storage_info(self) -> dict[str, Any]:
         """저장 공간 정보."""
@@ -257,13 +308,10 @@ class PostRepositorySQLite:
         size_bytes = DB_PATH.stat().st_size
         size_mb = size_bytes / (1024 * 1024)
 
-        conn = sqlite3.connect(DB_PATH)
+        conn = _get_db()
         cursor = conn.cursor()
-        try:
-            cursor.execute("SELECT COUNT(*) FROM posts")
-            count = cursor.fetchone()[0]
-        finally:
-            conn.close()
+        cursor.execute("SELECT COUNT(*) FROM posts")
+        count = cursor.fetchone()[0]
 
         return {
             "size_bytes": size_bytes,
