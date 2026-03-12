@@ -21,7 +21,7 @@ from src.infrastructure.database.repositories.category_repo import FirestoreCate
 from src.infrastructure.database.repositories.collection_run_repo import (
     FirestoreCollectionRunRepository,
 )
-from src.infrastructure.database.repositories.post_repo import FirestorePostRepository
+from src.infrastructure.database.repositories.post_repo_sqlite import PostRepositorySQLite
 from src.infrastructure.delivery.briefing_builder import DefaultBriefingGenerator
 from src.infrastructure.delivery.email_sender import EmailNotifier
 
@@ -38,8 +38,10 @@ class Container:
         self.settings = settings
         self.config = app_config
 
-        # ─── Repositories (Firebase Firestore) ───
-        self.post_repo = FirestorePostRepository(firestore_db)
+        # ─── Repositories ───
+        # Posts: SQLite (로컬 저장소, 비용 $0)
+        self.post_repo = PostRepositorySQLite()
+        # Briefings: Firebase Firestore (웹 대시보드용)
         self.briefing_repo = FirestoreBriefingRepository(firestore_db)
         self.category_repo = FirestoreCategoryRepository(firestore_db)
         self.run_repo = FirestoreCollectionRunRepository(firestore_db)

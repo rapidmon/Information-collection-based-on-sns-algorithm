@@ -87,6 +87,16 @@ class Orchestrator:
             name="Health Check",
         )
 
+        # ─── 자동 데이터 정리 (매일 자정, 1개월 이상 된 데이터 삭제) ───
+        self.scheduler.add_job(
+            self._cleanup_old_posts,
+            trigger=CronTrigger(hour=0, minute=0),  # 매일 자정
+            id="cleanup_posts",
+            name="Cleanup Old Posts",
+            max_instances=1,
+        )
+        logger.info("자동 데이터 정리 등록: 매일 자정 (1개월 이상 데이터 삭제)")
+
     def start(self) -> None:
         self.scheduler.start()
         logger.info("스케줄러 시작됨")
@@ -153,3 +163,17 @@ class Orchestrator:
                     )
             except Exception:
                 pass
+
+    async def _cleanup_old_posts(self) -> None:
+        """1개월 이상 된 포스트 자동 삭제 (로컬 SQLite 정리)."""
+        logger.info("[scheduler] 데이터 정리 시작 (1개월 이상 데이터 삭제)")
+        try:
+            deleted_count = self._c.post_repo.delete_older_than(days=30)
+            storage_info = self._c.post_repo.get_storage_info()
+            logger.info(
+                f"[scheduler] 데이터 정리 완료: {deleted_count}건 삭제, "
+                f"남은 데이터: {storage_info['document_count']}건 "
+                f"({storage_info['size_mb']}MB)"
+            )
+        except Exception as e:
+            logger.error(f"[scheduler] 데이터 정리 오류: {e}")

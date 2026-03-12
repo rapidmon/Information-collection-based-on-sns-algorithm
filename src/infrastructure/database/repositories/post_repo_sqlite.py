@@ -1,0 +1,272 @@
+"""PostRepository — SQLite 구현 (로컬 저장소).
+
+로컬 노트북에서 Posts를 SQLite로 저장/관리합니다.
+Firestore 대신 파일 기반 데이터베이스 사용 (비용 $0).
+"""
+
+from __future__ import annotations
+
+import sqlite3
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Any
+
+from src.domain.entities import Post
+
+
+DB_PATH = Path("data/posts.db")
+
+
+def init_sqlite_db() -> None:
+    """SQLite 데이터베이스 초기화 및 스키마 생성."""
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS posts (
+            id TEXT PRIMARY KEY,
+            source TEXT NOT NULL,
+            external_id TEXT NOT NULL,
+            url TEXT,
+            author TEXT,
+            author_url TEXT,
+            content_text TEXT NOT NULL,
+            content_html TEXT,
+            media_urls TEXT,
+
+            engagement_likes INTEGER DEFAULT 0,
+            engagement_reposts INTEGER DEFAULT 0,
+            engagement_comments INTEGER DEFAULT 0,
+            engagement_views INTEGER DEFAULT 0,
+
+            published_at TIMESTAMP,
+            collected_at TIMESTAMP NOT NULL,
+
+            summary TEXT,
+            importance_score REAL,
+            language TEXT,
+            is_relevant INTEGER,
+            category_names TEXT,
+            keywords TEXT,
+            briefed_at TIMESTAMP,
+
+            content_hash TEXT,
+            dedup_cluster_id INTEGER,
+
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    """)
+
+    # 인덱스 생성 (성능 최적화)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_collected_at ON posts(collected_at);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_source ON posts(source);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_external_id ON posts(external_id);")
+
+    conn.commit()
+    conn.close()
+
+
+def _post_to_dict(post: Post) -> dict[str, Any]:
+    """Post 엔티티를 SQLite 저장용 딕셔너리로 변환."""
+    import json
+
+    return {
+        "id": post.external_id,  # external_id를 primary key로 사용
+        "source": post.source,
+        "external_id": post.external_id,
+        "url": post.url,
+        "author": post.author,
+        "author_url": post.author_url,
+        "content_text": post.content_text,
+        "content_html": post.content_html,
+        "media_urls": json.dumps(post.media_urls),
+        "engagement_likes": post.engagement_likes,
+        "engagement_reposts": post.engagement_reposts,
+        "engagement_comments": post.engagement_comments,
+        "engagement_views": post.engagement_views,
+        "published_at": post.published_at,
+        "collected_at": post.collected_at,
+        "summary": post.summary,
+        "importance_score": post.importance_score,
+        "language": post.language,
+        "is_relevant": 1 if post.is_relevant else 0 if post.is_relevant is not None else None,
+        "category_names": json.dumps(post.category_names),
+        "keywords": json.dumps(post.keywords),
+        "briefed_at": post.briefed_at,
+        "content_hash": post.content_hash,
+        "dedup_cluster_id": post.dedup_cluster_id,
+    }
+
+
+def _post_from_row(row: sqlite3.Row) -> Post:
+    """SQLite 행을 Post 엔티티로 변환."""
+    import json
+
+    return Post(
+        id=row["id"],
+        source=row["source"],
+        external_id=row["external_id"],
+        url=row["url"],
+        author=row["author"],
+        author_url=row["author_url"],
+        content_text=row["content_text"],
+        content_html=row["content_html"],
+        media_urls=json.loads(row["media_urls"] or "[]"),
+        engagement_likes=row["engagement_likes"],
+        engagement_reposts=row["engagement_reposts"],
+        engagement_comments=row["engagement_comments"],
+        engagement_views=row["engagement_views"],
+        published_at=row["published_at"],
+        collected_at=row["collected_at"],
+        summary=row["summary"],
+        importance_score=row["importance_score"],
+        language=row["language"],
+        is_relevant=bool(row["is_relevant"]) if row["is_relevant"] is not None else None,
+        category_names=json.loads(row["category_names"] or "[]"),
+        keywords=json.loads(row["keywords"] or "[]"),
+        briefed_at=row["briefed_at"],
+        content_hash=row["content_hash"],
+        dedup_cluster_id=row["dedup_cluster_id"],
+    )
+
+
+class PostRepositorySQLite:
+    """SQLite 기반 Post 저장소."""
+
+    def __init__(self):
+        init_sqlite_db()
+
+    def save(self, post: Post) -> str:
+        """Post 저장 (신규 또는 업데이트)."""
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        data = _post_to_dict(post)
+
+        try:
+            cursor.execute("""
+                INSERT OR REPLACE INTO posts
+                (id, source, external_id, url, author, author_url, content_text,
+                 content_html, media_urls, engagement_likes, engagement_reposts,
+                 engagement_comments, engagement_views, published_at, collected_at,
+                 summary, importance_score, language, is_relevant, category_names,
+                 keywords, briefed_at, content_hash, dedup_cluster_id, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            """, tuple(data.values()) + (datetime.now(),))
+            conn.commit()
+            return data["id"]
+        finally:
+            conn.close()
+
+    def find_by_id(self, post_id: str) -> Post | None:
+        """ID로 Post 조회."""
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute("SELECT * FROM posts WHERE id = ?", (post_id,))
+            row = cursor.fetchone()
+            return _post_from_row(row) if row else None
+        finally:
+            conn.close()
+
+    def find_by_external_id(self, external_id: str) -> Post | None:
+        """external_id로 Post 조회."""
+        return self.find_by_id(external_id)
+
+    def find_recent(self, limit: int = 100) -> list[Post]:
+        """최근 Post 조회."""
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute("""
+                SELECT * FROM posts
+                ORDER BY collected_at DESC
+                LIMIT ?
+            """, (limit,))
+            return [_post_from_row(row) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    def find_by_source(self, source: str, limit: int = 100) -> list[Post]:
+        """소스별 Post 조회."""
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute("""
+                SELECT * FROM posts
+                WHERE source = ?
+                ORDER BY collected_at DESC
+                LIMIT ?
+            """, (source, limit))
+            return [_post_from_row(row) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    def delete(self, post_id: str) -> None:
+        """Post 삭제."""
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute("DELETE FROM posts WHERE id = ?", (post_id,))
+            conn.commit()
+        finally:
+            conn.close()
+
+    def delete_older_than(self, days: int) -> int:
+        """N일 이상 된 Post 삭제 (자동 정리용)."""
+        cutoff_date = datetime.now() - timedelta(days=days)
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute(
+                "DELETE FROM posts WHERE collected_at < ?",
+                (cutoff_date,)
+            )
+            conn.commit()
+            return cursor.rowcount
+        finally:
+            conn.close()
+
+    def count(self) -> int:
+        """전체 Post 수."""
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute("SELECT COUNT(*) FROM posts")
+            return cursor.fetchone()[0]
+        finally:
+            conn.close()
+
+    def get_storage_info(self) -> dict[str, Any]:
+        """저장 공간 정보."""
+        if not DB_PATH.exists():
+            return {"size_bytes": 0, "size_mb": 0}
+
+        size_bytes = DB_PATH.stat().st_size
+        size_mb = size_bytes / (1024 * 1024)
+
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        try:
+            cursor.execute("SELECT COUNT(*) FROM posts")
+            count = cursor.fetchone()[0]
+        finally:
+            conn.close()
+
+        return {
+            "size_bytes": size_bytes,
+            "size_mb": round(size_mb, 2),
+            "document_count": count,
+        }
