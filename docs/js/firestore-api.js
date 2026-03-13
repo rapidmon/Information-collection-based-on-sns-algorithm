@@ -3,65 +3,35 @@ import {
     getDocs, getDoc, doc, Timestamp
 } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
 import { db } from './firebase-config.js';
+import { API_BASE_URL } from './config.js';
 
 /**
- * 최근 게시물 조회
+ * 최근 게시물 조회 (REST API)
  * @param {Object} opts - { source?, category?, searchQuery?, limitCount?, lastDoc? }
- * @returns {Promise<{ posts: Array, lastDoc: Object|null }>}
+ * @returns {Promise<{ posts: Array, lastDoc: number|null }>}
  */
 export async function getRecentPosts(opts = {}) {
-    const { source, category, searchQuery, limitCount = 50, lastDoc: cursor, includeUnprocessed = false } = opts;
+    const { source, category, searchQuery, limitCount = 50, lastDoc: offset = 0 } = opts;
 
-    const constraints = [];
+    const params = new URLSearchParams();
+    if (source) params.set('source', source);
+    if (category) params.set('category', category);
+    if (searchQuery) params.set('q', searchQuery);
+    params.set('limit', limitCount);
+    params.set('offset', typeof offset === 'number' ? offset : 0);
 
-    // AI 처리 완료된 게시물만 (is_relevant == true)
-    if (!includeUnprocessed) {
-        constraints.push(where('is_relevant', '==', true));
-    }
+    const res = await fetch(`${API_BASE_URL}/posts/search?${params}`);
+    if (!res.ok) throw new Error(`API error: ${res.status}`);
+    const posts = await res.json();
 
-    if (source) {
-        constraints.push(where('source', '==', source));
-    }
+    const currentOffset = typeof offset === 'number' ? offset : 0;
+    const nextOffset = currentOffset + posts.length;
+    const hasMore = posts.length >= limitCount;
 
-    // 카테고리는 클라이언트 사이드에서 필터링 (복합 인덱스 불필요)
-
-    constraints.push(orderBy('collected_at', 'desc'));
-
-    if (cursor) {
-        constraints.push(startAfter(cursor));
-    }
-
-    // 카테고리 필터 시 더 많이 가져와서 클라이언트에서 필터링
-    const fetchCount = category ? limitCount * 3 : limitCount;
-    constraints.push(limit(fetchCount));
-
-    const q = query(collection(db, 'posts'), ...constraints);
-    const snapshot = await getDocs(q);
-
-    let posts = snapshot.docs.map(d => ({ id: d.id, ...d.data(), _doc: d }));
-
-    // 클라이언트 사이드 카테고리 필터링
-    if (category) {
-        posts = posts.filter(p =>
-            (p.category_names || []).includes(category)
-        );
-    }
-
-    // Client-side text search (Firestore doesn't support full-text search)
-    if (searchQuery) {
-        const lower = searchQuery.toLowerCase();
-        posts = posts.filter(p =>
-            (p.content_text || '').toLowerCase().includes(lower) ||
-            (p.summary || '').toLowerCase().includes(lower) ||
-            (p.author || '').toLowerCase().includes(lower)
-        );
-    }
-
-    const lastDocument = snapshot.docs.length > 0
-        ? snapshot.docs[snapshot.docs.length - 1]
-        : null;
-
-    return { posts, lastDoc: lastDocument };
+    return {
+        posts,
+        lastDoc: hasMore ? nextOffset : null,
+    };
 }
 
 /**
@@ -140,36 +110,21 @@ export async function getCategories() {
 }
 
 /**
- * 소스별 최근 24시간 수집 건수
+ * 소스별 최근 24시간 수집 건수 (REST API)
  */
 export async function getSourceCounts24h() {
-    const since = Timestamp.fromDate(new Date(Date.now() - 24 * 60 * 60 * 1000));
-
-    const q = query(
-        collection(db, 'posts'),
-        where('collected_at', '>=', since),
-        orderBy('collected_at', 'desc')
-    );
-    const snapshot = await getDocs(q);
-
-    const counts = {};
-    snapshot.docs.forEach(d => {
-        const source = d.data().source || 'unknown';
-        counts[source] = (counts[source] || 0) + 1;
-    });
-
-    return counts;
+    const res = await fetch(`${API_BASE_URL}/stats`);
+    if (!res.ok) throw new Error(`API error: ${res.status}`);
+    const data = await res.json();
+    return data.source_counts_24h || {};
 }
 
 /**
- * 최근 수집 실행 기록
+ * 최근 수집 실행 기록 (REST API)
  */
 export async function getRecentRuns(limitCount = 10) {
-    const q = query(
-        collection(db, 'collection_runs'),
-        orderBy('started_at', 'desc'),
-        limit(limitCount)
-    );
-    const snapshot = await getDocs(q);
-    return snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+    const res = await fetch(`${API_BASE_URL}/stats`);
+    if (!res.ok) throw new Error(`API error: ${res.status}`);
+    const data = await res.json();
+    return (data.recent_runs || []).slice(0, limitCount);
 }

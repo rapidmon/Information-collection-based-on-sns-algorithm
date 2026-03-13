@@ -22,10 +22,13 @@ async def search_posts(
     source: str | None = None,
     category: str | None = None,
     limit: int = 30,
+    offset: int = 0,
 ):
     """게시물 검색 API."""
     c = _get_container(request)
-    posts = await c.post_repo.search(query=q, source=source, category=category, limit=limit)
+    posts = await c.post_repo.search(
+        query=q, source=source, category=category, limit=limit, offset=offset
+    )
     return [
         {
             "id": p.id,
@@ -35,7 +38,8 @@ async def search_posts(
             "summary": p.summary,
             "url": p.url,
             "importance_score": p.importance_score,
-            "categories": p.category_names,
+            "category_names": p.category_names,
+            "keywords": p.keywords,
             "collected_at": p.collected_at.isoformat() if p.collected_at else None,
         }
         for p in posts
@@ -132,3 +136,66 @@ async def stats(request: Request):
             for r in runs
         ],
     }
+
+
+@router.get("/briefings")
+async def list_briefings(request: Request, limit: int = 20, offset: int = 0):
+    """브리핑 목록 API."""
+    c = _get_container(request)
+    try:
+        briefings = await c.briefing_repo.get_all(limit=limit * 2, offset=offset)
+        return {
+            "briefings": [
+                {
+                    "id": b.id,
+                    "title": b.title,
+                    "generated_at": b.generated_at.isoformat() if b.generated_at else None,
+                    "total_items": b.total_items,
+                }
+                for b in briefings[:limit]
+            ],
+            "has_more": len(briefings) > limit,
+        }
+    except Exception:
+        return JSONResponse(status_code=500, content={"error": "브리핑 조회 실패"})
+
+
+@router.get("/briefings/{briefing_id}")
+async def get_briefing(request: Request, briefing_id: str):
+    """단일 브리핑 API."""
+    c = _get_container(request)
+    try:
+        b = await c.briefing_repo.get_by_id(briefing_id)
+        if not b:
+            return JSONResponse(status_code=404, content={"error": "브리핑 없음"})
+        return {
+            "id": b.id,
+            "title": b.title,
+            "generated_at": b.generated_at.isoformat() if b.generated_at else None,
+            "content_html": b.content_html,
+            "total_items": b.total_items,
+        }
+    except Exception:
+        return JSONResponse(status_code=500, content={"error": "브리핑 조회 실패"})
+
+
+@router.get("/categories")
+async def list_categories(request: Request):
+    """카테고리 목록 API."""
+    c = _get_container(request)
+    try:
+        categories = await c.category_repo.get_all()
+        if not categories:
+            # Fallback
+            categories = [
+                {"name": "AI", "name_ko": "AI"},
+                {"name": "Semiconductor", "name_ko": "반도체"},
+                {"name": "Cloud", "name_ko": "클라우드"},
+                {"name": "BigTech", "name_ko": "빅테크"},
+                {"name": "Startup", "name_ko": "스타트업"},
+                {"name": "Regulation", "name_ko": "규제"},
+                {"name": "Coding", "name_ko": "코딩"},
+            ]
+        return categories
+    except Exception:
+        return JSONResponse(status_code=500, content={"error": "카테고리 조회 실패"})

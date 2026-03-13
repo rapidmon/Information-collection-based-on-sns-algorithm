@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -17,6 +18,14 @@ _TEMPLATE_DIR = Path(__file__).parent / "templates"
 
 def create_app(container: Container) -> FastAPI:
     app = FastAPI(title="SNS Tech Briefing", version="0.1.0")
+
+    # CORS 설정 (GitHub Pages + Cloudflare Tunnel)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],  # Cloudflare Tunnel URL이 매번 바뀌므로
+        allow_methods=["GET"],
+        allow_headers=["*"],
+    )
 
     # 컨테이너를 앱 state에 저장
     app.state.container = container

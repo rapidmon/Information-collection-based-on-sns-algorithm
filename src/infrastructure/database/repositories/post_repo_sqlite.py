@@ -6,6 +6,7 @@ Firestore 대신 파일 기반 데이터베이스 사용 (비용 $0).
 
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 import threading
 from datetime import datetime, timedelta
@@ -298,6 +299,91 @@ class PostRepositorySQLite:
             LIMIT ?
         """, (limit,))
         return [_post_from_row(row) for row in cursor.fetchall()]
+
+    async def search(
+        self,
+        query: str | None = None,
+        source: str | None = None,
+        category: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[Post]:
+        """게시물 검색 (비동기 래퍼)."""
+        def _search():
+            import json
+            conn = _get_db()
+            cursor = conn.cursor()
+
+            conditions = ["is_relevant = 1"]
+            params = []
+
+            if source:
+                conditions.append("source = ?")
+                params.append(source)
+
+            if query:
+                conditions.append(f"(content_text LIKE ? OR summary LIKE ?)")
+                search_term = f"%{query}%"
+                params.extend([search_term, search_term])
+
+            if category:
+                conditions.append(f"category_names LIKE ?")
+                params.append(f'%"{category}"%')
+
+            where_clause = " AND ".join(conditions)
+            sql = f"""
+                SELECT * FROM posts
+                WHERE {where_clause}
+                ORDER BY collected_at DESC
+                LIMIT ? OFFSET ?
+            """
+            params.extend([limit, offset])
+
+            cursor.execute(sql, params)
+            return [_post_from_row(row) for row in cursor.fetchall()]
+
+        return await asyncio.to_thread(_search)
+
+    async def count_by_source(self, start: datetime, end: datetime) -> dict[str, int]:
+        """기간별 소스별 게시물 수."""
+        def _count():
+            conn = _get_db()
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT source, COUNT(*) as count
+                FROM posts
+                WHERE collected_at BETWEEN ? AND ?
+                GROUP BY source
+            """, (start, end))
+
+            return {row[0]: row[1] for row in cursor.fetchall()}
+
+        return await asyncio.to_thread(_count)
+
+    async def get_by_period(
+        self, start: datetime, end: datetime, relevant_only: bool = True
+    ) -> list[Post]:
+        """기간별 게시물 조회."""
+        def _get():
+            conn = _get_db()
+            cursor = conn.cursor()
+
+            sql = """
+                SELECT * FROM posts
+                WHERE collected_at BETWEEN ? AND ?
+            """
+            params = [start, end]
+
+            if relevant_only:
+                sql += " AND is_relevant = 1"
+
+            sql += " ORDER BY collected_at DESC"
+
+            cursor.execute(sql, params)
+            return [_post_from_row(row) for row in cursor.fetchall()]
+
+        return await asyncio.to_thread(_get)
 
     def get_storage_info(self) -> dict[str, Any]:
         """저장 공간 정보."""
