@@ -142,7 +142,7 @@
                     source: sourceFilter.value || undefined,
                     category: categoryFilter.value || undefined,
                     searchQuery: searchInput.value.trim() || undefined,
-                    limitCount: 50,
+                    limitCount: 20,
                     lastDoc: append ? lastDoc : null,
                 };
 
@@ -163,7 +163,7 @@
                     postsList.innerHTML = html;
                 }
 
-                if (result.posts.length >= 50) {
+                if (result.posts.length >= 20) {
                     loadMoreWrapper.classList.remove('hidden');
                 } else {
                     loadMoreWrapper.classList.add('hidden');

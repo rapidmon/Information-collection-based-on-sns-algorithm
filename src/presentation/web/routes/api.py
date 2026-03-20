@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -9,6 +10,21 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 router = APIRouter(tags=["api"])
+
+# ─── 간단한 인메모리 TTL 캐시 ───
+_cache: dict[str, tuple[float, object]] = {}
+_CACHE_TTL = 60  # 초
+
+
+def _cache_get(key: str):
+    entry = _cache.get(key)
+    if entry and time.time() - entry[0] < _CACHE_TTL:
+        return entry[1]
+    return None
+
+
+def _cache_set(key: str, value):
+    _cache[key] = (time.time(), value)
 
 
 def _get_container(request: Request):
@@ -31,16 +47,21 @@ async def search_posts(
     offset: int = 0,
 ):
     """게시물 검색 API."""
+    cache_key = f"posts:{q}:{source}:{category}:{limit}:{offset}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached
+
     c = _get_container(request)
     posts = await c.post_repo.search(
         query=q, source=source, category=category, limit=limit, offset=offset
     )
-    return [
+    result = [
         {
             "id": p.id,
             "source": p.source,
             "author": p.author,
-            "content_text": p.content_text[:300],
+            "content_text": p.content_text[:200],
             "summary": p.summary,
             "url": p.url,
             "importance_score": p.importance_score,
@@ -50,6 +71,8 @@ async def search_posts(
         }
         for p in posts
     ]
+    _cache_set(cache_key, result)
+    return result
 
 
 @router.post("/collect/trigger/{source}")
@@ -126,12 +149,16 @@ async def latest_briefing(request: Request):
 @router.get("/stats")
 async def stats(request: Request):
     """수집 통계."""
+    cached = _cache_get("stats")
+    if cached is not None:
+        return cached
+
     c = _get_container(request)
     try:
         now = datetime.utcnow()
         counts = await c.post_repo.count_by_source(now - timedelta(hours=24), now)
         runs = await c.run_repo.get_recent(limit=10)
-        return {
+        result = {
             "source_counts_24h": counts,
             "recent_runs": [
                 {
@@ -143,6 +170,8 @@ async def stats(request: Request):
                 for r in runs
             ],
         }
+        _cache_set("stats", result)
+        return result
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
@@ -191,9 +220,15 @@ async def get_briefing(request: Request, briefing_id: str):
 @router.get("/keywords/top")
 async def top_keywords(request: Request, limit: int = 20, days: int = 2):
     """최근 N일간 자주 언급된 키워드 top K."""
+    cache_key = f"keywords:{limit}:{days}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached
+
     c = _get_container(request)
     try:
         keywords = await c.post_repo.get_top_keywords(limit=limit, days=days)
+        _cache_set(cache_key, keywords)
         return keywords
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})

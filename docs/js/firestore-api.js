@@ -11,7 +11,7 @@ import { API_BASE_URL } from './config.js';
  * @returns {Promise<{ posts: Array, lastDoc: number|null }>}
  */
 export async function getRecentPosts(opts = {}) {
-    const { source, category, searchQuery, limitCount = 50, lastDoc: offset = 0 } = opts;
+    const { source, category, searchQuery, limitCount = 20, lastDoc: offset = 0 } = opts;
 
     const params = new URLSearchParams();
     if (source) params.set('source', source);
@@ -26,7 +26,7 @@ export async function getRecentPosts(opts = {}) {
 
     const currentOffset = typeof offset === 'number' ? offset : 0;
     const nextOffset = currentOffset + posts.length;
-    const hasMore = posts.length >= limitCount;
+    const hasMore = posts.length >= limitCount && posts.length > 0;
 
     return {
         posts,

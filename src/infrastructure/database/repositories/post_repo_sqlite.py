@@ -80,6 +80,7 @@ def init_sqlite_db() -> None:
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_external_id ON posts(external_id);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_is_relevant ON posts(is_relevant);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_source_is_relevant ON posts(source, is_relevant);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_is_relevant_collected ON posts(is_relevant, collected_at DESC);")
 
     conn.commit()
 
