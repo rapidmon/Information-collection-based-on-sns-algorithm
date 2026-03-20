@@ -189,7 +189,7 @@ async def get_briefing(request: Request, briefing_id: str):
 
 
 @router.get("/keywords/top")
-async def top_keywords(request: Request, limit: int = 20, days: int = 7):
+async def top_keywords(request: Request, limit: int = 20, days: int = 2):
     """최근 N일간 자주 언급된 키워드 top K."""
     c = _get_container(request)
     try:

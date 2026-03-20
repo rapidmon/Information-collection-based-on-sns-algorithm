@@ -114,7 +114,7 @@ export async function getCategories() {
  * @param {number} days  - 최근 며칠 (기본 7)
  * @returns {Promise<Array<{keyword: string, count: number}>>}
  */
-export async function getTopKeywords(limit = 20, days = 7) {
+export async function getTopKeywords(limit = 20, days = 2) {
     const res = await fetch(`${API_BASE_URL}/keywords/top?limit=${limit}&days=${days}`);
     if (!res.ok) throw new Error(`API error: ${res.status}`);
     return await res.json();

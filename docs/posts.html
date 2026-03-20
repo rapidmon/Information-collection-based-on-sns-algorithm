@@ -27,7 +27,7 @@
         <div class="card p-4 mb-4">
             <div class="flex items-center gap-2 mb-3">
                 <span class="text-xs font-semibold" style="color: var(--text-muted);">트렌딩 키워드 TOP 20</span>
-                <span class="text-xs" style="color: var(--text-muted);">· 최근 7일</span>
+                <span class="text-xs" style="color: var(--text-muted);">· 최근 2일</span>
             </div>
             <div id="trending-keywords" class="flex flex-wrap gap-2">
                 <div class="skeleton w-14 h-6 rounded-full"></div>
@@ -199,7 +199,7 @@
         async function loadTrendingKeywords() {
             const container = document.getElementById('trending-keywords');
             try {
-                const keywords = await getTopKeywords(20, 7);
+                const keywords = await getTopKeywords(20, 2);
                 if (!keywords.length) {
                     container.innerHTML = '<span class="text-xs" style="color: var(--text-muted);">데이터 없음</span>';
                     return;

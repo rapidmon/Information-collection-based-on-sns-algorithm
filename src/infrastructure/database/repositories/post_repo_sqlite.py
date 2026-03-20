@@ -385,23 +385,31 @@ class PostRepositorySQLite:
 
         return await asyncio.to_thread(_get)
 
-    async def get_top_keywords(self, limit: int = 20, days: int = 7) -> list[dict]:
-        """최근 N일간 is_relevant 게시물의 키워드 빈도 top K."""
+    async def get_top_keywords(self, limit: int = 20, days: int = 2) -> list[dict]:
+        """최근 N일간 is_relevant 게시물의 키워드 빈도 top K.
+        결과가 없으면 날짜 제한 없이 전체에서 조회한다."""
         def _query():
             conn = _get_db()
             cursor = conn.cursor()
-            cursor.execute("""
-                SELECT value AS keyword, COUNT(*) AS cnt
-                FROM posts, json_each(posts.keywords)
-                WHERE is_relevant = 1
-                  AND keywords IS NOT NULL
-                  AND keywords != '[]'
-                  AND collected_at >= datetime('now', ?)
-                GROUP BY value
-                ORDER BY cnt DESC
-                LIMIT ?
-            """, (f"-{days} days", limit))
-            return [{"keyword": row[0], "count": row[1]} for row in cursor.fetchall()]
+
+            def _run(date_filter: str | None):
+                base = """
+                    SELECT value AS keyword, COUNT(*) AS cnt
+                    FROM posts, json_each(posts.keywords)
+                    WHERE is_relevant = 1
+                      AND keywords IS NOT NULL
+                      AND keywords != '[]'
+                """
+                if date_filter:
+                    base += f" AND collected_at >= datetime('now', '{date_filter}')"
+                base += " GROUP BY value ORDER BY cnt DESC LIMIT ?"
+                cursor.execute(base, (limit,))
+                return [{"keyword": row[0], "count": row[1]} for row in cursor.fetchall()]
+
+            results = _run(f"-{days} days")
+            if not results:
+                results = _run(None)  # 날짜 제한 없이 전체 재조회
+            return results
 
         return await asyncio.to_thread(_query)
 
