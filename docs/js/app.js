@@ -99,13 +99,10 @@ export function showEmpty(containerId, message) {
     }
 }
 
-// Importance score badge
-function importanceBadge(score) {
+// Importance score — 숫자만 표시
+function importanceText(score) {
     if (!score && score !== 0) return '';
-    let cls = 'badge-importance-low';
-    if (score >= 0.8) cls = 'badge-importance-high';
-    else if (score >= 0.6) cls = 'badge-importance-mid';
-    return `<span class="badge ${cls}">${score.toFixed(1)}</span>`;
+    return `<span class="score-text">${score.toFixed(1)}</span>`;
 }
 
 /**
@@ -137,10 +134,10 @@ export function renderPostCard(post) {
     const titleText = truncate(post.summary || post.content_text || '', 120);
     const titleHtml = highlightKeywords(titleText, post.keywords || []);
 
-    const categories = (post.category_names || []).map(cat => {
-        const cls = CATEGORY_BADGE[cat] || 'badge-default';
-        return `<span class="badge ${cls}">${escapeHtml(cat)}</span>`;
-    }).join('');
+    // 카테고리: outline 스타일 (색 없음)
+    const categories = (post.category_names || [])
+        .map(cat => `<span class="cat-chip">${escapeHtml(cat)}</span>`)
+        .join('');
 
     const safeUrl = (post.url || '').replace('twitter.com', 'x.com').replace(/([a-z])\/\/+/g, '$1/');
     const link = safeUrl
@@ -155,13 +152,13 @@ export function renderPostCard(post) {
 
     return `
     <div class="post-card flex flex-col">
-        <div class="px-4 pt-3 pb-2 flex items-center justify-between">
+        <div class="px-4 pt-3 pb-2 flex items-center gap-2">
             <span class="badge badge-${source}">${source}</span>
-            ${importanceBadge(post.importance_score)}
+            ${categories}
+            <span class="ml-auto">${importanceText(post.importance_score)}</span>
         </div>
         <div class="flex-1 px-4 py-2">
             <p class="card-inline-title">${titleHtml}</p>
-            ${categories ? `<div class="flex flex-wrap gap-1.5 mt-3">${categories}</div>` : ''}
         </div>
         <div class="px-4 py-2.5 card-foot-divider flex items-center justify-between text-xs" style="color: var(--text-muted);">
             <div class="flex items-center gap-3">
