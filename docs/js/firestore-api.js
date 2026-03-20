@@ -100,10 +100,9 @@ const DEFAULT_CATEGORIES = [
 
 export async function getCategories() {
     try {
-        const q = query(collection(db, 'categories'));
-        const snapshot = await getDocs(q);
-        const categories = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-        return categories.length > 0 ? categories : DEFAULT_CATEGORIES;
+        const res = await fetch(`${API_BASE_URL}/categories`);
+        if (!res.ok) throw new Error();
+        return await res.json();
     } catch {
         return DEFAULT_CATEGORIES;
     }
