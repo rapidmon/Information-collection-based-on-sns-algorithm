@@ -22,9 +22,10 @@ def create_app(container: Container) -> FastAPI:
     # CORS 설정 (GitHub Pages + Cloudflare Tunnel)
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],  # Cloudflare Tunnel URL이 매번 바뀌므로
-        allow_methods=["GET"],
+        allow_origins=["*"],
+        allow_methods=["GET", "POST", "OPTIONS"],
         allow_headers=["*"],
+        expose_headers=["*"],
     )
 
     # 컨테이너를 앱 state에 저장
