@@ -188,6 +188,17 @@ async def get_briefing(request: Request, briefing_id: str):
         return JSONResponse(status_code=500, content={"error": "브리핑 조회 실패"})
 
 
+@router.get("/keywords/top")
+async def top_keywords(request: Request, limit: int = 20, days: int = 7):
+    """최근 N일간 자주 언급된 키워드 top K."""
+    c = _get_container(request)
+    try:
+        keywords = await c.post_repo.get_top_keywords(limit=limit, days=days)
+        return keywords
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
 @router.get("/categories")
 async def list_categories(request: Request):
     """카테고리 목록 API."""

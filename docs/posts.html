@@ -23,6 +23,21 @@
     <main class="max-w-7xl mx-auto px-4 py-8">
         <h1 class="text-2xl font-bold mb-4" style="color: var(--text-primary);">게시물 탐색</h1>
 
+        <!-- 트렌딩 키워드 TOP 20 -->
+        <div class="card p-4 mb-4">
+            <div class="flex items-center gap-2 mb-3">
+                <span class="text-xs font-semibold" style="color: var(--text-muted);">트렌딩 키워드 TOP 20</span>
+                <span class="text-xs" style="color: var(--text-muted);">· 최근 7일</span>
+            </div>
+            <div id="trending-keywords" class="flex flex-wrap gap-2">
+                <div class="skeleton w-14 h-6 rounded-full"></div>
+                <div class="skeleton w-16 h-6 rounded-full"></div>
+                <div class="skeleton w-12 h-6 rounded-full"></div>
+                <div class="skeleton w-18 h-6 rounded-full"></div>
+                <div class="skeleton w-14 h-6 rounded-full"></div>
+            </div>
+        </div>
+
         <!-- 필터 바 -->
         <div class="card p-4 mb-6">
             <div class="flex flex-wrap gap-3 items-end">
@@ -77,7 +92,7 @@
     </footer>
 
     <script type="module">
-        import { getRecentPosts, getCategories } from './js/firestore-api.js';
+        import { getRecentPosts, getCategories, getTopKeywords } from './js/firestore-api.js';
         import { renderPostCard, showError, showEmpty, setActiveNav, skeletonCards } from './js/app.js';
 
         setActiveNav();
@@ -180,8 +195,41 @@
 
         loadMoreBtn.addEventListener('click', () => loadPosts(true));
 
+        // 트렌딩 키워드 로드
+        async function loadTrendingKeywords() {
+            const container = document.getElementById('trending-keywords');
+            try {
+                const keywords = await getTopKeywords(20, 7);
+                if (!keywords.length) {
+                    container.innerHTML = '<span class="text-xs" style="color: var(--text-muted);">데이터 없음</span>';
+                    return;
+                }
+                const maxCount = keywords[0].count;
+                container.innerHTML = keywords.map((kw, i) => {
+                    const opacity = Math.max(0.45, kw.count / maxCount);
+                    const rank = i + 1;
+                    return `<button
+                        class="trending-kw-chip"
+                        data-keyword="${kw.keyword}"
+                        title="${kw.count}회 언급"
+                        style="opacity: ${opacity.toFixed(2)};"
+                    >#${kw.keyword} <span class="trending-kw-count">${kw.count}</span></button>`;
+                }).join('');
+
+                container.querySelectorAll('.trending-kw-chip').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        searchInput.value = btn.dataset.keyword;
+                        loadPosts(false);
+                    });
+                });
+            } catch {
+                container.innerHTML = '<span class="text-xs" style="color: var(--text-muted);">키워드 로드 실패</span>';
+            }
+        }
+
         // 초기 로드
         loadCategories();
+        loadTrendingKeywords();
         loadPosts(false);
     </script>
 </body>

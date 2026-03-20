@@ -385,6 +385,26 @@ class PostRepositorySQLite:
 
         return await asyncio.to_thread(_get)
 
+    async def get_top_keywords(self, limit: int = 20, days: int = 7) -> list[dict]:
+        """최근 N일간 is_relevant 게시물의 키워드 빈도 top K."""
+        def _query():
+            conn = _get_db()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT value AS keyword, COUNT(*) AS cnt
+                FROM posts, json_each(posts.keywords)
+                WHERE is_relevant = 1
+                  AND keywords IS NOT NULL
+                  AND keywords != '[]'
+                  AND collected_at >= datetime('now', ?)
+                GROUP BY value
+                ORDER BY cnt DESC
+                LIMIT ?
+            """, (f"-{days} days", limit))
+            return [{"keyword": row[0], "count": row[1]} for row in cursor.fetchall()]
+
+        return await asyncio.to_thread(_query)
+
     def get_storage_info(self) -> dict[str, Any]:
         """저장 공간 정보."""
         if not DB_PATH.exists():

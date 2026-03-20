@@ -109,6 +109,18 @@ export async function getCategories() {
 }
 
 /**
+ * 트렌딩 키워드 top K (REST API)
+ * @param {number} limit - 상위 몇 개 (기본 20)
+ * @param {number} days  - 최근 며칠 (기본 7)
+ * @returns {Promise<Array<{keyword: string, count: number}>>}
+ */
+export async function getTopKeywords(limit = 20, days = 7) {
+    const res = await fetch(`${API_BASE_URL}/keywords/top?limit=${limit}&days=${days}`);
+    if (!res.ok) throw new Error(`API error: ${res.status}`);
+    return await res.json();
+}
+
+/**
  * 소스별 최근 24시간 수집 건수 (REST API)
  */
 export async function getSourceCounts24h() {

@@ -367,6 +367,32 @@ main, nav, footer {
     white-space: nowrap;
 }
 
+/* 트렌딩 키워드 칩 */
+.trending-kw-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 10px;
+    border-radius: 9999px;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+    white-space: nowrap;
+}
+.trending-kw-chip:hover {
+    background: var(--accent-dim);
+    border-color: var(--accent);
+    color: var(--accent);
+}
+.trending-kw-count {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+}
+
 /* 중요도 점수 */
 .score-text {
     font-size: 0.75rem;
