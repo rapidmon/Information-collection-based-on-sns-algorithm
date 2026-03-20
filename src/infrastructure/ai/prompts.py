@@ -58,11 +58,19 @@ FILTER_AND_SUMMARIZE = """아래 소셜 미디어 게시물들의 기술 산업 
 {posts_json}
 
 ## 출력 형식
+**입력된 모든 게시물에 대해 반드시 결과를 포함하세요. 관련 없는 게시물도 생략하지 말고 is_relevant: false로 출력하세요.**
+
 [
   {{
     "post_id": "...",
     "is_relevant": true,
     "summary": "한국어 요약...",
+    "language": "ko"
+  }},
+  {{
+    "post_id": "...",
+    "is_relevant": false,
+    "summary": null,
     "language": "ko"
   }}
 ]"""

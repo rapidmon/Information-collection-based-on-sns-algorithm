@@ -42,17 +42,26 @@ class ProcessPostsUseCase:
         post_map = {p.id: p for p in posts}
         relevant_posts = []
         irrelevant_posts = []
+        processed_ids: set[str] = set()
 
         for result in filter_results:
             post = post_map.get(result.post_id)
             if post is None:
                 continue
+            processed_ids.add(result.post_id)
             post.is_relevant = result.is_relevant
             post.summary = result.summary or ("[filtered]" if not result.is_relevant else None)
             post.language = result.language
             if result.is_relevant:
                 relevant_posts.append(post)
             else:
+                irrelevant_posts.append(post)
+
+        # AI가 응답에 포함하지 않은 게시물도 비관련으로 처리 (재처리 루프 방지)
+        for post in posts:
+            if post.id not in processed_ids:
+                post.is_relevant = False
+                post.summary = "[filtered]"
                 irrelevant_posts.append(post)
 
         # 2. 관련 게시물만 분류 + 중요도
