@@ -41,7 +41,8 @@
       "Bash(where cloudflared:*)",
       "Read(//c/Program Files/**)",
       "Bash(winget list:*)",
-      "Bash(pip freeze:*)"
+      "Bash(pip freeze:*)",
+      "Bash(python -c \":*)"
     ],
     "disallow": [
       "Bash(git push)"
