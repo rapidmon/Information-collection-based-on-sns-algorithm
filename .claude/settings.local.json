@@ -40,7 +40,11 @@
       "Bash(ls docs/js/ && grep -n \"loadPosts\\\\|fetch.*posts\" docs/js/*.js | head -10)",
       "Bash(where cloudflared:*)",
       "Read(//c/Program Files/**)",
-      "Bash(winget list:*)"
+      "Bash(winget list:*)",
+      "Bash(pip freeze:*)"
+    ],
+    "disallow": [
+      "Bash(git push)"
     ]
   }
 }
