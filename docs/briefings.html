@@ -9,8 +9,7 @@
 </head>
 <body class="min-h-screen">
     <!-- 네비게이션 -->
-    <nav class="sticky top-0 z-50" style="backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); background: linear-gradient(180deg, rgba(15,15,13,0.9), rgba(15,15,13,0.7)); border-bottom: 2px solid rgba(0, 87, 255, 0.2); box-shadow: 0 0 30px rgba(0, 87, 255, 0.1), 0 8px 32px rgba(0, 0, 0, 0.3);">
-        <div style="position: absolute; top: 0; left: 0; right: 0; height: 1px; background: linear-gradient(90deg, transparent, rgba(0, 87, 255, 0.3), transparent);"></div>
+    <nav class="sticky top-0 z-50" style="background: #fff; border-bottom: 1px solid var(--border); box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
         <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
             <a href="index.html" class="text-lg font-bold" style="color: var(--text-primary);">SNS Tech Briefing</a>
             <div class="flex gap-8">
@@ -34,7 +33,7 @@
 
         <!-- 브리핑 상세 모달 (같은 페이지 내) -->
         <div id="briefing-detail" class="hidden mt-6">
-            <button id="back-to-list" class="text-sm transition-colors" style="color: var(--text-secondary);" onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--text-secondary)'">← 목록으로 돌아가기</button>
+            <button id="back-to-list" class="text-sm transition-colors" style="color: var(--text-secondary);">← 목록으로 돌아가기</button>
             <div class="card overflow-hidden mt-4">
                 <div class="px-6 py-4" style="border-bottom: 1px solid var(--border);">
                     <h2 id="detail-title" class="text-xl font-bold" style="color: var(--text-primary);"></h2>
@@ -52,23 +51,9 @@
         </div>
     </main>
 
-    <footer class="text-center text-xs py-6" style="color: var(--text-muted); border-top: 2px solid rgba(0, 87, 255, 0.2); background: linear-gradient(180deg, transparent, rgba(0, 87, 255, 0.05)); position: relative;">
-        <div style="position: absolute; top: 0; left: 0; right: 0; height: 1px; background: linear-gradient(90deg, transparent, rgba(0, 87, 255, 0.3), transparent);"></div>
+    <footer class="text-center text-xs py-6" style="color: var(--text-muted); border-top: 1px solid var(--border);">
         SNS Tech Briefing System v0.1.0
     </footer>
-
-    <script>
-        document.addEventListener('scroll', () => {
-            const nav = document.querySelector('nav');
-            if (window.scrollY > 8) {
-                nav.style.background = 'linear-gradient(180deg, rgba(15,15,13,0.95), rgba(15,15,13,0.85))';
-                nav.style.boxShadow = '0 0 40px rgba(0, 87, 255, 0.15), 0 12px 40px rgba(0, 0, 0, 0.4)';
-            } else {
-                nav.style.background = 'linear-gradient(180deg, rgba(15,15,13,0.9), rgba(15,15,13,0.7))';
-                nav.style.boxShadow = '0 0 30px rgba(0, 87, 255, 0.1), 0 8px 32px rgba(0, 0, 0, 0.3)';
-            }
-        }, { passive: true });
-    </script>
 
     <script type="module">
         import { getBriefings, getBriefingById } from './js/firestore-api.js';

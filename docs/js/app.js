@@ -127,74 +127,48 @@ function highlightKeywords(text, keywords) {
 }
 
 /**
- * 게시물 플립 카드 HTML 생성
+ * 게시물 카드 HTML 생성 (플립 없음)
  */
 export function renderPostCard(post) {
     const source = escapeHtml(post.source || '');
     const author = escapeHtml(truncate(post.author || '', 20));
     const time = formatTimestamp(post.collected_at, 'short');
 
-    // 앞면: 제목 (요약에서 키워드 하이라이트)
-    const titleText = truncate(post.summary || post.content_text || '', 80);
+    const titleText = truncate(post.summary || post.content_text || '', 120);
     const titleHtml = highlightKeywords(titleText, post.keywords || []);
 
-    // 뒷면: 카테고리
     const categories = (post.category_names || []).map(cat => {
         const cls = CATEGORY_BADGE[cat] || 'badge-default';
         return `<span class="badge ${cls}">${escapeHtml(cat)}</span>`;
     }).join('');
 
-    // 뒷면: 본문
-    const body = post.summary
-        ? escapeHtml(post.summary)
-        : escapeHtml(truncate(post.content_text, 300));
-
-    // 뒷면: 원문 링크 (twitter.com → x.com 정규화)
     const safeUrl = (post.url || '').replace('twitter.com', 'x.com');
     const link = safeUrl
         ? `<a href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer"
-               onclick="event.stopPropagation()"
-               class="btn-primary text-xs py-1 inline-flex items-center gap-1">
+               class="post-link text-xs inline-flex items-center gap-1">
                원문 보기
-               <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+               <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
                </svg>
            </a>`
         : '';
 
     return `
-    <div class="card-container cursor-pointer" onclick="this.querySelector('.card-inner').classList.toggle('flipped')">
-        <div class="card-inner">
-            <!-- 앞면: 제목 (키워드 인라인) + 소스 + 중요도 -->
-            <div class="card-front flex flex-col">
-                <div class="px-4 pt-3 pb-2 flex items-center justify-between">
-                    <span class="badge badge-${source}">${source}</span>
-                    ${importanceBadge(post.importance_score)}
-                </div>
-                <div class="flex-1 px-4 py-3 flex flex-col justify-center">
-                    <p class="card-inline-title">${titleHtml}</p>
-                </div>
-                <div class="px-4 py-2 card-foot-divider flex items-center justify-between text-xs" style="color: var(--text-muted);">
-                    <span class="truncate max-w-[120px]">${author}</span>
-                    <span class="flex items-center gap-1">
-                        ${time}
-                        <svg class="w-3.5 h-3.5 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
-                        </svg>
-                    </span>
-                </div>
+    <div class="post-card flex flex-col">
+        <div class="px-4 pt-3 pb-2 flex items-center justify-between">
+            <span class="badge badge-${source}">${source}</span>
+            ${importanceBadge(post.importance_score)}
+        </div>
+        <div class="flex-1 px-4 py-2">
+            <p class="card-inline-title">${titleHtml}</p>
+            ${categories ? `<div class="flex flex-wrap gap-1.5 mt-3">${categories}</div>` : ''}
+        </div>
+        <div class="px-4 py-2.5 card-foot-divider flex items-center justify-between text-xs" style="color: var(--text-muted);">
+            <div class="flex items-center gap-3">
+                ${link}
+                <span class="truncate max-w-[100px]">${author}</span>
             </div>
-            <!-- 뒷면: 요약 + 카테고리 + 링크 -->
-            <div class="card-back flex flex-col">
-                ${categories ? `<div class="px-4 pt-3 pb-1 flex gap-1.5 flex-wrap">${categories}</div>` : ''}
-                <div class="flex-1 px-4 py-2 overflow-y-auto">
-                    <p class="text-sm leading-relaxed" style="color: var(--text-secondary);">${body}</p>
-                </div>
-                <div class="px-4 py-2.5 card-foot-divider flex items-center justify-between">
-                    <span class="text-xs truncate max-w-[120px]" style="color: var(--text-muted);">${author}</span>
-                    ${link}
-                </div>
-            </div>
+            <span>${time}</span>
         </div>
     </div>`;
 }
