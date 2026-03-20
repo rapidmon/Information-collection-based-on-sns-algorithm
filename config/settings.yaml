@@ -82,6 +82,7 @@ email:
   enabled: true
   to_addresses:
     - "ehhwll@hanmail.net"
+    - "ndbsrjsdn@naver.com"
 
 web:
   host: "0.0.0.0"
