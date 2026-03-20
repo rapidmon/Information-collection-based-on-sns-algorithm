@@ -232,7 +232,7 @@ class TwitterCollector:
             return Post(
                 source="twitter",
                 external_id=f"tw_{tweet_id}",
-                url=f"https://x.com/{screen_name}/status/{tweet_id}",
+                url=f"https://x.com/{screen_name}/status/{tweet_id}" if screen_name else f"https://x.com/i/web/status/{tweet_id}",
                 author=display_name,
                 author_url=f"https://x.com/{screen_name}" if screen_name else None,
                 content_text=full_text,

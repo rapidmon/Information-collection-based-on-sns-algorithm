@@ -139,7 +139,8 @@ export function renderPostCard(post) {
         .map(cat => `<span class="cat-chip">${escapeHtml(cat)}</span>`)
         .join('');
 
-    const safeUrl = (post.url || '').replace('twitter.com', 'x.com').replace(/([a-z])\/\/+/g, '$1/');
+    const rawUrl = (post.url || '').replace('twitter.com', 'x.com');
+    const safeUrl = rawUrl.replace(/x\.com\/\/status\/(\d+)/, 'x.com/i/web/status/$1');
     const link = safeUrl
         ? `<a href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer"
                class="post-link text-xs inline-flex items-center gap-1">
