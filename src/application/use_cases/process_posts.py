@@ -41,22 +41,19 @@ class ProcessPostsUseCase:
 
         post_map = {p.id: p for p in posts}
         relevant_posts = []
-        irrelevant_ids = []
+        irrelevant_posts = []
 
         for result in filter_results:
             post = post_map.get(result.post_id)
             if post is None:
                 continue
             post.is_relevant = result.is_relevant
-            post.summary = result.summary
+            post.summary = result.summary or ("[filtered]" if not result.is_relevant else None)
             post.language = result.language
             if result.is_relevant:
                 relevant_posts.append(post)
             else:
-                # 관련 없는 게시물은 삭제 대상
-                doc_id = post.id or post.external_id
-                if doc_id:
-                    irrelevant_ids.append(doc_id)
+                irrelevant_posts.append(post)
 
         # 2. 관련 게시물만 분류 + 중요도
         if relevant_posts:
@@ -69,27 +66,20 @@ class ProcessPostsUseCase:
                     post.importance_score = cr.importance_score
                     post.keywords = cr.keywords or []
 
-        # 3. 관련 게시물만 DB 배치 업데이트 (성능 최적화)
+        # 3. 관련/비관련 게시물 모두 DB 업데이트 (재처리 방지)
         updated = 0
-        if relevant_posts:
-            updated = self._post_repo.update_many(relevant_posts)
-
-        # 4. 관련 없는 게시물 삭제
-        deleted = 0
-        for doc_id in irrelevant_ids:
-            self._post_repo.delete(doc_id)
-            deleted += 1
-        if deleted:
-            logger.info(f"관련 없는 게시물 {deleted}건 삭제")
+        all_processed = relevant_posts + irrelevant_posts
+        if all_processed:
+            updated = self._post_repo.update_many(all_processed)
 
         stats = {
             "total": len(posts),
             "relevant": len(relevant_posts),
-            "filtered_out": len(irrelevant_ids),
-            "deleted": deleted,
+            "filtered_out": len(irrelevant_posts),
+            "deleted": 0,
         }
         logger.info(
             f"AI 처리 완료: 전체 {stats['total']}건, "
-            f"관련 {stats['relevant']}건, 삭제 {stats['deleted']}건"
+            f"관련 {stats['relevant']}건, 비관련 {stats['filtered_out']}건"
         )
         return stats

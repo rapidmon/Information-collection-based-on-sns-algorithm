@@ -295,7 +295,7 @@ class PostRepositorySQLite:
         cursor.execute("""
             SELECT * FROM posts
             WHERE summary IS NULL
-            ORDER BY collected_at ASC
+            ORDER BY collected_at DESC
             LIMIT ?
         """, (limit,))
         return [_post_from_row(row) for row in cursor.fetchall()]
