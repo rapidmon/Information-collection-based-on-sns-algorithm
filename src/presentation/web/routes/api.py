@@ -15,6 +15,12 @@ def _get_container(request: Request):
     return request.app.state.container
 
 
+def _iso(val) -> str | None:
+    if val is None:
+        return None
+    return val.isoformat() if hasattr(val, 'isoformat') else val
+
+
 @router.get("/posts/search")
 async def search_posts(
     request: Request,
@@ -40,7 +46,7 @@ async def search_posts(
             "importance_score": p.importance_score,
             "category_names": p.category_names,
             "keywords": p.keywords,
-            "collected_at": p.collected_at.isoformat() if p.collected_at else None,
+            "collected_at": _iso(p.collected_at),
         }
         for p in posts
     ]
@@ -111,7 +117,7 @@ async def latest_briefing(request: Request):
     return {
         "id": b.id,
         "title": b.title,
-        "generated_at": b.generated_at.isoformat() if b.generated_at else None,
+        "generated_at": _iso(b.generated_at),
         "total_items": b.total_items,
         "content_html": b.content_html,
     }
@@ -121,21 +127,24 @@ async def latest_briefing(request: Request):
 async def stats(request: Request):
     """수집 통계."""
     c = _get_container(request)
-    now = datetime.utcnow()
-    counts = await c.post_repo.count_by_source(now - timedelta(hours=24), now)
-    runs = await c.run_repo.get_recent(limit=10)
-    return {
-        "source_counts_24h": counts,
-        "recent_runs": [
-            {
-                "source": r.source,
-                "status": r.status,
-                "posts_collected": r.posts_collected,
-                "started_at": r.started_at.isoformat() if r.started_at else None,
-            }
-            for r in runs
-        ],
-    }
+    try:
+        now = datetime.utcnow()
+        counts = await c.post_repo.count_by_source(now - timedelta(hours=24), now)
+        runs = await c.run_repo.get_recent(limit=10)
+        return {
+            "source_counts_24h": counts,
+            "recent_runs": [
+                {
+                    "source": r.source,
+                    "status": r.status,
+                    "posts_collected": r.posts_collected,
+                    "started_at": _iso(r.started_at),
+                }
+                for r in runs
+            ],
+        }
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
 
 @router.get("/briefings")
@@ -149,7 +158,7 @@ async def list_briefings(request: Request, limit: int = 20, offset: int = 0):
                 {
                     "id": b.id,
                     "title": b.title,
-                    "generated_at": b.generated_at.isoformat() if b.generated_at else None,
+                    "generated_at": _iso(b.generated_at),
                     "total_items": b.total_items,
                 }
                 for b in briefings[:limit]
@@ -171,7 +180,7 @@ async def get_briefing(request: Request, briefing_id: str):
         return {
             "id": b.id,
             "title": b.title,
-            "generated_at": b.generated_at.isoformat() if b.generated_at else None,
+            "generated_at": _iso(b.generated_at),
             "content_html": b.content_html,
             "total_items": b.total_items,
         }
@@ -186,7 +195,6 @@ async def list_categories(request: Request):
     try:
         categories = await c.category_repo.get_all()
         if not categories:
-            # Fallback
             categories = [
                 {"name": "AI", "name_ko": "AI"},
                 {"name": "Semiconductor", "name_ko": "반도체"},
