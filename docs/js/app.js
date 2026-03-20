@@ -18,7 +18,12 @@ const CATEGORY_BADGE = {
  */
 export function formatTimestamp(ts, format = 'datetime') {
     if (!ts) return '';
-    const date = ts.toDate ? ts.toDate() : new Date(ts);
+    // SQLite UTC 문자열('2026-03-20 15:48:58')을 올바르게 파싱 (Z 없으면 로컬 시간으로 오해석)
+    let dateInput = ts;
+    if (typeof ts === 'string' && !ts.endsWith('Z') && !ts.includes('+')) {
+        dateInput = ts.replace(' ', 'T') + 'Z';
+    }
+    const date = ts.toDate ? ts.toDate() : new Date(dateInput);
 
     const pad = n => String(n).padStart(2, '0');
     const y = date.getFullYear();
