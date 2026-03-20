@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from src.domain.entities import Category
 from src.application.use_cases.collect_posts import CollectPostsUseCase
 from src.application.use_cases.generate_briefing import GenerateBriefingUseCase
 from src.application.use_cases.process_posts import ProcessPostsUseCase
@@ -17,10 +18,8 @@ from src.infrastructure.collectors.threads_collector import ThreadsCollector
 from src.infrastructure.collectors.twitter_collector import TwitterCollector
 from src.infrastructure.config.settings import AppConfig, Settings, SnsCredentials
 from src.infrastructure.database.repositories.briefing_repo import FirestoreBriefingRepository
-from src.infrastructure.database.repositories.category_repo import FirestoreCategoryRepository
-from src.infrastructure.database.repositories.collection_run_repo import (
-    FirestoreCollectionRunRepository,
-)
+from src.infrastructure.database.repositories.category_repo_memory import MemoryCategoryRepository
+from src.infrastructure.database.repositories.collection_run_repo_sqlite import SQLiteCollectionRunRepository
 from src.infrastructure.database.repositories.post_repo_sqlite import PostRepositorySQLite
 from src.infrastructure.delivery.briefing_builder import DefaultBriefingGenerator
 from src.infrastructure.delivery.email_sender import EmailNotifier
@@ -39,12 +38,12 @@ class Container:
         self.config = app_config
 
         # ─── Repositories ───
-        # Posts: SQLite (로컬 저장소, 비용 $0)
         self.post_repo = PostRepositorySQLite()
-        # Briefings: Firebase Firestore (웹 대시보드용)
-        self.briefing_repo = FirestoreBriefingRepository(firestore_db)
-        self.category_repo = FirestoreCategoryRepository(firestore_db)
-        self.run_repo = FirestoreCollectionRunRepository(firestore_db)
+        self.briefing_repo = FirestoreBriefingRepository(firestore_db)  # 브리핑만 Firestore
+        self.category_repo = MemoryCategoryRepository(
+            [Category(name=c.name, name_ko=c.name_ko, color=c.color) for c in app_config.categories]
+        )
+        self.run_repo = SQLiteCollectionRunRepository()
 
         # ─── Infrastructure Services ───
         self.ai_processor = OpenAIProcessor(

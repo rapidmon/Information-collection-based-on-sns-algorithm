@@ -74,9 +74,6 @@ async def run_server(
         firestore_db=db,
     )
 
-    # 카테고리 시드
-    await seed_categories(container, config)
-
     # 스케줄러
     orchestrator = None
     if not no_scheduler:

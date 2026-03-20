@@ -23,7 +23,7 @@ class ProcessPostsUseCase:
 
     async def execute(self, limit: int = 200, min_posts_threshold: int = 0) -> dict[str, int]:
         """미처리 게시물을 AI로 처리. 처리 통계를 반환."""
-        posts = await self._post_repo.get_unprocessed(limit=limit)
+        posts = self._post_repo.get_unprocessed(limit=limit)
         if not posts:
             logger.info("처리할 새 게시물 없음")
             return {"total": 0, "relevant": 0, "filtered_out": 0, "deleted": 0}
@@ -72,12 +72,14 @@ class ProcessPostsUseCase:
         # 3. 관련 게시물만 DB 배치 업데이트 (성능 최적화)
         updated = 0
         if relevant_posts:
-            updated = await self._post_repo.update_many(relevant_posts)
+            updated = self._post_repo.update_many(relevant_posts)
 
         # 4. 관련 없는 게시물 삭제
         deleted = 0
-        if irrelevant_ids:
-            deleted = await self._post_repo.delete_many(irrelevant_ids)
+        for doc_id in irrelevant_ids:
+            self._post_repo.delete(doc_id)
+            deleted += 1
+        if deleted:
             logger.info(f"관련 없는 게시물 {deleted}건 삭제")
 
         stats = {
