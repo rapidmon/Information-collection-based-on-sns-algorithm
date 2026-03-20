@@ -1,4 +1,4 @@
 ## Latest Session
 - Date: 2026-03-20
-- Summary: .claude/context/session-2026-03-20.md
-- Status: 🔌 Firebase → 로컬 전환 완료 (SQLite/메모리), Cloudflare named tunnel 설정, UI 리디자인, API 버그 수정
+- Summary: .claude/context/session-2026-03-20-2.md
+- Status: ⚠️ 트렌딩 키워드 TOP 20 추가 완료, 서버 재시작 + AI 처리 트리거 필요 (오늘 수집 데이터 미처리 상태)
