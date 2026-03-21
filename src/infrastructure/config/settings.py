@@ -82,7 +82,7 @@ class ProcessingConfig:
         self.batch_size_summarize: int = data.get("batch_size_summarize", 15)
         self.batch_size_categorize: int = data.get("batch_size_categorize", 20)
         self.use_batch_api: bool = data.get("use_batch_api", True)
-        self.min_importance_for_briefing: float = data.get("min_importance_for_briefing", 0.4)
+        self.min_importance_for_briefing: float = data.get("min_importance_for_briefing", 0.7)
         self.dedup_chunk_size: int = data.get("dedup_chunk_size", 80)
         self.processing_interval_minutes: int = data.get("processing_interval_minutes", 30)
         self.min_posts_to_process: int = data.get("min_posts_to_process", 5)

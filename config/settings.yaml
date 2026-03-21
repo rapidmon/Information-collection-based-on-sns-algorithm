@@ -68,14 +68,14 @@ processing:
   batch_size_summarize: 15
   batch_size_categorize: 20
   use_batch_api: true
-  min_importance_for_briefing: 0.4
+  min_importance_for_briefing: 0.7
   dedup_chunk_size: 80
   processing_interval_minutes: 30
   min_posts_to_process: 10
 
 briefing:
   daily_time: "09:00"
-  max_items: 20
+  max_items: 0
   include_stats: true
 
 email:
