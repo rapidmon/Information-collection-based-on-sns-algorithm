@@ -43,7 +43,12 @@
       "Bash(winget list:*)",
       "Bash(pip freeze:*)",
       "Bash(python -c \":*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(xargs grep:*)",
+      "Bash(ls /c/Users/ehhwl/Desktop/private_project/sns_algorithm_data_collection/*.log)",
+      "Bash(find /c/Users/ehhwl/Desktop/private_project/sns_algorithm_data_collection -name *.log)",
+      "Bash(ls /c/Users/ehhwl/Desktop/private_project/sns_algorithm_data_collection/*.json)",
+      "Bash(grep -r min_importance_for_briefing /c/Users/ehhwl/Desktop/private_project/sns_algorithm_data_collection/ --include=*.yaml --include=*.yml --include=*.json --include=*.env)"
     ],
     "disallow": [
       "Bash(git push)"
