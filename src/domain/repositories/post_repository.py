@@ -58,3 +58,11 @@ class PostRepository(Protocol):
     async def count_by_source(self, start: datetime, end: datetime) -> dict[str, int]:
         """소스별 게시물 수 집계."""
         ...
+
+    async def get_unbriefed(self, limit: int = 500) -> list[Post]:
+        """브리핑에 포함되지 않은 관련 게시물 조회."""
+        ...
+
+    async def mark_briefed(self, post_ids: list[str], briefed_at: datetime) -> int:
+        """게시물들의 briefed_at 설정 (브리핑 완료 마킹)."""
+        ...

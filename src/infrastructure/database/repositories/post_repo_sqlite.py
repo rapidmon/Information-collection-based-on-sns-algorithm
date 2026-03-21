@@ -414,6 +414,41 @@ class PostRepositorySQLite:
 
         return await asyncio.to_thread(_query)
 
+    async def get_unbriefed(self, limit: int = 500) -> list[Post]:
+        """브리핑에 포함되지 않은 관련 게시물 조회 (briefed_at IS NULL)."""
+        def _query():
+            conn = _get_db()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM posts
+                WHERE is_relevant = 1
+                  AND briefed_at IS NULL
+                ORDER BY collected_at DESC
+                LIMIT ?
+            """, (limit,))
+            return [_post_from_row(row) for row in cursor.fetchall()]
+
+        return await asyncio.to_thread(_query)
+
+    async def mark_briefed(self, post_ids: list[str], briefed_at: datetime) -> int:
+        """게시물들의 briefed_at을 설정 (브리핑 완료 마킹)."""
+        if not post_ids:
+            return 0
+
+        def _update():
+            conn = _get_db()
+            cursor = conn.cursor()
+            placeholders = ",".join("?" * len(post_ids))
+            cursor.execute(f"""
+                UPDATE posts
+                SET briefed_at = ?
+                WHERE id IN ({placeholders})
+            """, [briefed_at.isoformat(), *post_ids])
+            conn.commit()
+            return cursor.rowcount
+
+        return await asyncio.to_thread(_update)
+
     def get_storage_info(self) -> dict[str, Any]:
         """저장 공간 정보."""
         if not DB_PATH.exists():
