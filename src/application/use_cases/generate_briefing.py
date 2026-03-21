@@ -37,7 +37,7 @@ class GenerateBriefingUseCase:
     async def execute(self, period_start: datetime, period_end: datetime) -> Briefing:
         """미브리핑 게시물로 브리핑 생성."""
         # 아직 브리핑에 포함되지 않은 관련 게시물 조회
-        posts = await self._post_repo.get_unbriefed(limit=500)
+        posts = await self._post_repo.get_unbriefed(limit=10000)
         if not posts:
             logger.warning("브리핑 생성할 미브리핑 게시물 없음")
             return Briefing(

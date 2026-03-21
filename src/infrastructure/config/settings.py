@@ -91,7 +91,7 @@ class ProcessingConfig:
 class BriefingConfig:
     def __init__(self, data: dict[str, Any]):
         self.daily_time: str = data.get("daily_time", "06:30")
-        self.max_items: int = data.get("max_items", 20)
+        self.max_items: int = data.get("max_items", 0)
         self.include_stats: bool = data.get("include_stats", True)
 
 
