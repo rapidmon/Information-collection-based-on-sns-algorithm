@@ -1,18 +1,218 @@
 # SNS Tech Briefing
 
-SNS 알고리즘 피드에서 AI/반도체/클라우드 정보를 자동 수집하고, AI로 요약/분류하여 매일 아침 브리핑을 생성하는 개인 시스템.
+SNS(X, Threads, LinkedIn, DCInside) 알고리즘 피드에서 기술 뉴스를 자동 수집하고, AI가 요약/분류하여 **매일 아침 이메일 브리핑**을 보내주는 시스템입니다.
+
+평소 팔로우하는 정보성 계정들의 피드를 AI가 읽고, 중요한 것만 골라 한국어로 정리해줍니다.
 
 ---
 
-## 특징
+## 이런 분에게 유용합니다
 
-| 항목 | 설명 |
-|------|------|
-| **자동 수집** | X(Twitter), Threads, LinkedIn, DCInside 4개 플랫폼 |
-| **AI 처리** | GPT-4o-mini로 필터링 + 요약 + 분류 + 중요도 판단 |
-| **매일 브리핑** | 오전 9:00 이메일 발송 |
-| **저장소** | Posts: 로컬 SQLite / Briefings: Firebase Firestore |
-| **웹 대시보드** | GitHub Pages (공개) + 로컬 FastAPI + Cloudflare Tunnel |
+- X(트위터), Threads 등에서 기술 트렌드를 팔로우하고 있지만 매번 확인하기 힘든 분
+- 정보성 SNS 계정을 많이 팔로우해뒀는데 피드를 놓치는 게 아까운 분
+- 매일 아침 핵심 기술 뉴스만 이메일로 받아보고 싶은 분
+
+---
+
+## 동작 방식
+
+```
+1. 수집 (10분마다)
+   로그인된 Chrome에서 SNS 피드를 자동 스크롤하며 게시물 수집
+
+2. AI 분석 (30분마다)
+   GPT-4o-mini가 각 게시물을 분석:
+   - 기술 관련 여부 필터링 (일상/밈/잡담 제거)
+   - 한국어 요약 생성
+   - 카테고리 분류 (AI, 반도체, 클라우드 등 7개)
+   - 중요도 점수 산정 (뉴스 가치 + 실무 활용도)
+
+3. 브리핑 발송 (매일 오전 9시)
+   중요도 높은 게시물을 모아 중복 제거 후 이메일로 발송
+```
+
+---
+
+## 시작하기
+
+### 필요한 것
+
+- **Python 3.12 이상** ([다운로드](https://www.python.org/downloads/))
+- **Google Chrome** (이미 설치되어 있을 가능성이 높음)
+- **OpenAI API 키** ([발급 방법](https://platform.openai.com/api-keys)) — 월 $2~5 수준
+- **Gmail 계정** — 브리핑 이메일 발송용
+
+### 1단계: 프로젝트 다운로드
+
+```bash
+git clone https://github.com/your-username/sns_algorithm_data_collection.git
+cd sns_algorithm_data_collection
+```
+
+### 2단계: 패키지 설치
+
+```bash
+pip install -r requirements.txt
+playwright install chromium
+```
+
+### 3단계: 환경 변수 설정
+
+프로젝트 폴더에 `.env` 파일을 만들고 아래 내용을 채워주세요.
+
+```env
+# OpenAI API 키 (https://platform.openai.com/api-keys 에서 발급)
+OPENAI_API_KEY=sk-...
+
+# Gmail 이메일 발송 설정
+# Gmail 앱 비밀번호 발급 방법:
+#   1. Google 계정 → 보안 → 2단계 인증 활성화
+#   2. Google 계정 → 보안 → 앱 비밀번호 → 새 비밀번호 생성
+#   3. 생성된 16자리 비밀번호를 아래에 입력
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=your@gmail.com
+SMTP_PASSWORD=xxxx-xxxx-xxxx-xxxx
+EMAIL_FROM=your@gmail.com
+
+# Firebase (웹 대시보드를 쓰지 않으면 생략 가능)
+# FIREBASE_CREDENTIAL_PATH=firebase-service-account.json
+# FIREBASE_PROJECT_ID=your-project-id
+
+# SNS 계정 정보 (수집할 플랫폼만 입력)
+TWITTER_USERNAME=your-handle
+TWITTER_PASSWORD=your-password
+THREADS_USERNAME=your-username
+THREADS_PASSWORD=your-password
+LINKEDIN_EMAIL=your@email.com
+LINKEDIN_PASSWORD=your-password
+```
+
+### 4단계: 브리핑 받을 이메일 주소 설정
+
+`config/settings.yaml` 파일에서 브리핑을 받을 이메일 주소를 수정하세요.
+
+```yaml
+email:
+  enabled: true
+  to_addresses:
+    - "your-email@example.com"
+```
+
+### 5단계: Chrome 디버그 모드 실행
+
+**중요: 반드시 아래 명령어 그대로 실행하세요.** `--user-data-dir` 옵션으로 기본 Chrome 프로필과 분리된 별도 세션을 사용합니다.
+
+```bash
+"C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222 --user-data-dir="C:\chrome_temp"
+```
+
+> Mac/Linux의 경우:
+> ```bash
+> # Mac
+> /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=9222 --user-data-dir="/tmp/chrome_temp"
+>
+> # Linux
+> google-chrome --remote-debugging-port=9222 --user-data-dir="/tmp/chrome_temp"
+> ```
+
+이 Chrome 창에서 수집하고 싶은 SNS에 로그인하세요:
+- **X (Twitter)** — https://x.com 에 로그인
+- **Threads** — https://www.threads.net 에 로그인
+- **LinkedIn** — https://www.linkedin.com 에 로그인
+
+> **팁**: 이 Chrome은 수집 전용이므로, 정보를 잘 올려주는 계정들만 팔로우한 계정으로 로그인하면 피드 품질이 좋아집니다.
+
+### 6단계: 서버 시작
+
+```bash
+python main.py serve
+```
+
+끝입니다! 서버가 시작되면 자동으로:
+- 10분마다 SNS 피드 수집
+- 30분마다 AI 분석 처리
+- 매일 오전 9시에 브리핑 이메일 발송
+
+---
+
+## 수집 소스 커스터마이징
+
+### 특정 플랫폼만 사용하기
+
+`config/settings.yaml`에서 사용하지 않을 플랫폼을 비활성화할 수 있습니다.
+
+```yaml
+collection:
+  twitter:
+    enabled: true     # 사용
+  threads:
+    enabled: true     # 사용
+  linkedin:
+    enabled: false    # 미사용
+  dcinside:
+    enabled: false    # 미사용
+```
+
+### DCInside 갤러리 변경
+
+DCInside는 특정 갤러리의 게시물을 수집합니다. 관심 갤러리로 변경할 수 있습니다.
+
+```yaml
+  dcinside:
+    enabled: true
+    gallery_id: "thesingularity"    # 갤러리 ID
+    gallery_type: "mgallery"        # mgallery(마이너) 또는 gallery(일반)
+```
+
+### 수집 주기 변경
+
+```yaml
+collection:
+  twitter:
+    interval_minutes: 10    # 기본 10분, 원하는 간격으로 변경
+```
+
+---
+
+## 카테고리
+
+수집된 게시물은 AI가 자동으로 7개 카테고리로 분류합니다.
+
+| 카테고리 | 내용 |
+|----------|------|
+| **AI** | 인공지능, LLM, GPT, Claude, 딥러닝 |
+| **반도체** | TSMC, HBM, GPU, NVIDIA, 파운드리 |
+| **클라우드** | AWS, Azure, GCP, 데이터센터 |
+| **빅테크** | Google, Apple, Meta, Amazon, Microsoft |
+| **스타트업** | 투자, 펀딩, M&A, 벤처 |
+| **규제/정책** | AI법, EU, 독점, 정부 정책 |
+| **코딩** | GitHub, 오픈소스, React, DevOps |
+
+카테고리를 추가/수정하려면 `config/settings.yaml`의 `categories` 항목을 편집하세요.
+
+---
+
+## 수동 실행
+
+자동 스케줄러 외에 직접 실행할 수도 있습니다.
+
+```bash
+# 즉시 수집 (모든 플랫폼)
+python main.py collect-now
+
+# 특정 플랫폼만 수집
+python main.py collect-now twitter
+
+# AI 처리 수동 트리거
+curl -X POST http://localhost:8000/api/process/trigger
+
+# 브리핑 즉시 생성
+curl -X POST http://localhost:8000/api/briefing/generate
+
+# 스케줄러 없이 웹 서버만 실행
+python main.py serve --no-scheduler
+```
 
 ---
 
@@ -51,131 +251,19 @@ SNS 알고리즘 피드에서 AI/반도체/클라우드 정보를 자동 수집�
 
 ---
 
-## 데이터 흐름
-
-```
-1. 수집 (10분마다)
-   Twitter, Threads, LinkedIn → SQLite
-   DCInside → SQLite (60분마다)
-
-2. AI 처리 (30분마다)
-   필터링: 기술 관련성 판단 (무관 게시물 삭제)
-   요약: 한국어 요약 생성
-   분류: 카테고리 + 키워드 추출
-   채점: 중요도 점수 (0~1)
-
-3. 매일 브리핑 (오전 9:00)
-   중요 게시물 수집 → 중복 제거 → HTML 생성
-   → Firestore 저장 + 이메일 발송
-
-4. 자동 정리 (매일 자정)
-   1개월 이상 된 Posts 삭제
-```
-
----
-
 ## 기술 스택
 
-| 층 | 기술 |
-|-----|------|
-| **언어** | Python 3.12+ |
-| **브라우저 자동화** | Playwright (Chrome CDP) |
-| **AI** | OpenAI GPT-4o-mini |
-| **Posts 저장소** | SQLite (로컬, 비용 $0) |
-| **Briefings 저장소** | Firebase Firestore |
-| **웹 서버** | FastAPI + uvicorn |
-| **외부 접근** | Cloudflare Tunnel (고정 도메인) |
-| **웹 대시보드** | GitHub Pages (정적) |
-| **스케줄러** | APScheduler |
-
----
-
-## 수집 소스
-
-| 소스 | 방식 | 주기 |
-|------|------|------|
-| X (Twitter) | CDP + GraphQL 인터셉트 | 10분 |
-| Threads | CDP + GraphQL 인터셉트 | 10분 |
-| LinkedIn | CDP + DOM 파싱 | 10분 |
-| DCInside | HTTP + BeautifulSoup | 60분 |
-
----
-
-## 빠른 시작
-
-### 1. 의존성 설치
-
-```bash
-pip install -r requirements.txt
-playwright install chromium
-```
-
-### 2. 환경 변수 설정
-
-`.env` 파일 생성:
-
-```env
-# OpenAI
-OPENAI_API_KEY=sk-...
-
-# 이메일 (Gmail 앱 비밀번호)
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USER=your@gmail.com
-SMTP_PASSWORD=your-app-password
-EMAIL_FROM=your@gmail.com
-
-# Firebase
-FIREBASE_CREDENTIAL_PATH=firebase-service-account.json
-FIREBASE_PROJECT_ID=your-project-id
-
-# SNS 계정
-TWITTER_USERNAME=your-handle
-TWITTER_PASSWORD=your-password
-THREADS_USERNAME=your-username
-THREADS_PASSWORD=your-password
-LINKEDIN_EMAIL=your@email.com
-LINKEDIN_PASSWORD=your-password
-```
-
-### 3. Chrome 디버그 모드 실행
-
-```bash
-"C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222
-```
-
-Chrome에서 X, Threads, LinkedIn, DCInside에 로그인.
-
-### 4. Cloudflare Tunnel 실행
-
-```bash
-cloudflared tunnel run --url http://localhost:8000 sns-briefing
-```
-
-### 5. 서버 시작
-
-```bash
-python main.py serve
-```
-
----
-
-## 수동 실행
-
-```bash
-# 즉시 수집
-python main.py collect-now
-python main.py collect-now twitter
-
-# AI 처리 트리거
-curl -X POST http://localhost:8000/api/process/trigger
-
-# 브리핑 생성
-curl -X POST http://localhost:8000/api/briefing/generate
-
-# 스케줄러 없이 웹만 실행
-python main.py serve --no-scheduler
-```
+| 항목 | 기술 |
+|------|------|
+| 언어 | Python 3.12+ |
+| 브라우저 자동화 | Playwright (Chrome CDP) |
+| AI | OpenAI GPT-4o-mini |
+| 게시물 저장소 | SQLite (로컬, 비용 $0) |
+| 브리핑 저장소 | Firebase Firestore (선택) |
+| 웹 서버 | FastAPI + uvicorn |
+| 외부 접근 | Cloudflare Tunnel (선택) |
+| 웹 대시보드 | GitHub Pages (선택) |
+| 스케줄러 | APScheduler |
 
 ---
 
@@ -195,21 +283,9 @@ sns_algorithm_data_collection/
 │       ├── collectors/      # SNS 수집기
 │       ├── database/
 │       │   └── repositories/
-│       │       ├── post_repo_sqlite.py          # Posts (로컬)
-│       │       ├── collection_run_repo_sqlite.py # 수집 이력 (로컬)
-│       │       ├── category_repo_memory.py       # 카테고리 (인메모리)
-│       │       └── briefing_repo.py              # Briefings (Firebase)
-│       ├── ai/              # OpenAI 처리
+│       ├── ai/              # OpenAI 프롬프트 및 처리
 │       └── config/
 ├── docs/                    # GitHub Pages 웹 대시보드
-│   ├── index.html           # 대시보드
-│   ├── briefings.html       # 브리핑 아카이브
-│   ├── posts.html           # 게시물 탐색
-│   ├── js/
-│   │   ├── config.js        # API URL 설정 (Cloudflare Tunnel)
-│   │   ├── firestore-api.js # API 호출
-│   │   └── app.js           # UI 렌더링
-│   └── css/style.css
 ├── data/
 │   └── posts.db             # SQLite (자동 생성)
 ├── config/
@@ -221,17 +297,50 @@ sns_algorithm_data_collection/
 
 ---
 
-## 카테고리
+## 웹 대시보드 (선택)
 
-| 카테고리 | 키워드 예시 |
-|----------|------------|
-| AI | AI, LLM, GPT, Claude, OpenAI, 딥러닝 |
-| 반도체 | TSMC, HBM, GPU, NVIDIA, 파운드리 |
-| 클라우드 | AWS, Azure, GCP, 데이터센터 |
-| 빅테크 | Google, Apple, Meta, Amazon, Microsoft |
-| 스타트업 | 투자, 펀딩, M&A, 벤처 |
-| 규제/정책 | AI법, EU, 독점, 정부 |
-| 코딩 | GitHub, 오픈소스, React, DevOps |
+브리핑을 이메일 외에 웹에서도 확인하고 싶다면 Firebase + Cloudflare Tunnel + GitHub Pages를 추가 설정할 수 있습니다. 이메일 브리핑만으로 충분하다면 이 단계는 건너뛰어도 됩니다.
+
+### Firebase 설정
+
+1. [Firebase Console](https://console.firebase.google.com/)에서 프로젝트 생성
+2. Firestore Database 생성
+3. 프로젝트 설정 → 서비스 계정 → 새 비공개 키 생성 → JSON 파일 다운로드
+4. 다운로드한 JSON 파일을 프로젝트 폴더에 넣고 `.env`에 경로 설정
+
+### Cloudflare Tunnel 설정
+
+```bash
+# Cloudflare Tunnel 설치 후
+cloudflared tunnel run --url http://localhost:8000 sns-briefing
+```
+
+---
+
+## 문제 해결
+
+### Chrome 연결 실패
+
+```bash
+# 포트 9222가 열려있는지 확인
+netstat -ano | findstr :9222
+```
+
+- Chrome이 디버그 모드로 실행 중인지 확인하세요
+- **반드시** `--user-data-dir="C:\chrome_temp"` 옵션과 함께 실행해야 합니다
+
+### 수집이 안 됨
+
+1. Chrome 디버그 모드가 포트 9222에서 실행 중인지 확인
+2. Chrome에서 해당 SNS에 로그인되어 있는지 확인
+3. `python main.py collect-now twitter`로 로그를 확인
+
+### 이메일이 안 옴
+
+1. Gmail **2단계 인증**이 활성화되어 있는지 확인
+2. **앱 비밀번호**를 사용하고 있는지 확인 (일반 비밀번호 아님)
+3. `.env`의 이메일 설정값 확인
+4. `config/settings.yaml`의 `to_addresses`가 올바른지 확인
 
 ---
 
@@ -239,51 +348,9 @@ sns_algorithm_data_collection/
 
 | 저장소 | 데이터 | 정리 정책 |
 |--------|--------|-----------|
-| SQLite (로컬) | Posts, 수집 이력 | 1개월 이상 자동 삭제 |
-| Firebase Firestore | Briefings | 영구 보관 |
+| SQLite (로컬) | 게시물, 수집 이력 | 1개월 이상 자동 삭제 |
+| Firebase Firestore | 브리핑 | 영구 보관 |
 
 ---
 
-## Firebase Firestore 규칙
-
-```
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    match /briefings/{document=**} {
-      allow read: if true;
-      allow write: if false;
-    }
-    match /{document=**} {
-      allow read, write: if false;
-    }
-  }
-}
-```
-
----
-
-## 문제 해결
-
-**Chrome 연결 실패**
-```bash
-netstat -ano | findstr :9222  # 포트 확인
-```
-
-**수집 안 됨**
-1. Chrome 디버그 포트 9222 확인
-2. SNS 로그인 상태 확인
-3. `python main.py collect-now twitter` 로 로그 확인
-
-**이메일 안 받음**
-1. Gmail 앱 비밀번호 사용 (2단계 인증 필수)
-2. `.env` 이메일 설정 확인
-
-**GitHub Pages에서 데이터 안 뜸**
-1. `docs/js/config.js`의 `API_BASE_URL` 확인
-2. Cloudflare Tunnel 실행 여부 확인
-3. 로컬 서버(`python main.py serve`) 실행 여부 확인
-
----
-
-**마지막 업데이트**: 2026-03-20
+**마지막 업데이트**: 2026-03-23
