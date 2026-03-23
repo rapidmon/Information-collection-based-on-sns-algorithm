@@ -48,7 +48,8 @@
       "Bash(ls /c/Users/ehhwl/Desktop/private_project/sns_algorithm_data_collection/*.log)",
       "Bash(find /c/Users/ehhwl/Desktop/private_project/sns_algorithm_data_collection -name *.log)",
       "Bash(ls /c/Users/ehhwl/Desktop/private_project/sns_algorithm_data_collection/*.json)",
-      "Bash(grep -r min_importance_for_briefing /c/Users/ehhwl/Desktop/private_project/sns_algorithm_data_collection/ --include=*.yaml --include=*.yml --include=*.json --include=*.env)"
+      "Bash(grep -r min_importance_for_briefing /c/Users/ehhwl/Desktop/private_project/sns_algorithm_data_collection/ --include=*.yaml --include=*.yml --include=*.json --include=*.env)",
+      "WebFetch(domain:www.threads.com)"
     ],
     "disallow": [
       "Bash(git push)"
