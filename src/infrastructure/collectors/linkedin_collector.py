@@ -1,13 +1,16 @@
 """LinkedIn 수집기.
 
 사용자의 실행 중인 Chrome에 CDP로 연결하여 DOM 파싱으로 피드를 수집한다.
+LinkedIn 2025+ 리디자인 대응: 해시 클래스명 대신 data-testid, aria-label 등 안정적 속성 사용.
 """
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import random
+import re
 from datetime import datetime
 
 from src.domain.entities import Post
@@ -82,14 +85,11 @@ class LinkedInCollector:
                 seen_ids: set[str] = set()
 
                 for round_num in range(self._config.scroll_rounds):
-                    updates = await page.query_selector_all(".feed-shared-update-v2")
-                    if not updates:
-                        updates = await page.query_selector_all(
-                            'div[data-urn*="urn:li:activity"]'
-                        )
+                    # 새 DOM: mainFeed 안의 포스트 항목들
+                    feed_items = await self._get_feed_items(page)
 
-                    for update in updates:
-                        post = await self._parse_feed_update(update)
+                    for item in feed_items:
+                        post = await self._parse_feed_update(item)
                         if post and post.external_id not in seen_ids:
                             seen_ids.add(post.external_id)
                             posts.append(post)
@@ -111,83 +111,61 @@ class LinkedInCollector:
             finally:
                 await page.close()
 
+    async def _get_feed_items(self, page) -> list:
+        """피드에서 실제 게시물 항목만 추출한다."""
+        # mainFeed 컨테이너의 직접 자식 중 본문 텍스트가 있는 것만 선택
+        items = await page.evaluate(
+            """() => {
+                const feed = document.querySelector('[data-testid="mainFeed"]');
+                if (!feed) return [];
+                const indices = [];
+                for (let i = 0; i < feed.children.length; i++) {
+                    const child = feed.children[i];
+                    // expandable-text-box가 있으면 실제 게시물
+                    const hasText = child.querySelector('[data-testid="expandable-text-box"]');
+                    if (hasText) {
+                        indices.push(i);
+                    }
+                }
+                return indices;
+            }"""
+        )
+        # 인덱스 기반으로 ElementHandle 획득
+        result = []
+        feed = await page.query_selector('[data-testid="mainFeed"]')
+        if not feed:
+            # 폴백: 이전 선택자 시도
+            legacy = await page.query_selector_all(".feed-shared-update-v2")
+            if legacy:
+                return legacy
+            return []
+
+        children = await feed.query_selector_all(":scope > div")
+        for idx in items:
+            if idx < len(children):
+                result.append(children[idx])
+        return result
+
     async def _parse_feed_update(self, element) -> Post | None:
         try:
-            urn = await element.get_attribute("data-urn") or ""
-            activity_id = ""
-            if "urn:li:activity:" in urn:
-                activity_id = urn.split("urn:li:activity:")[-1]
-            else:
-                data_id = await element.get_attribute("data-id") or ""
-                if data_id:
-                    activity_id = data_id
-
+            # 포스트 ID 추출: componentkey → 텍스트 해시 폴백
+            activity_id = await self._extract_activity_id(element)
             if not activity_id:
-                text_content = await element.inner_text()
-                if text_content:
-                    activity_id = str(hash(text_content[:200]))[:12]
-                else:
-                    return None
+                return None
 
-            # 작성자
-            author = ""
-            actor_el = await element.query_selector(
-                ".update-components-actor__name span:first-child"
-            )
-            if not actor_el:
-                actor_el = await element.query_selector(".feed-shared-actor__name")
-            if actor_el:
-                author = (await actor_el.inner_text()).strip()
-                author = author.split("\n")[0].strip()
+            # 작성자 이름: "~님의 게시물에 대한 관리 메뉴 열기" 버튼의 aria-label에서 추출
+            author = await self._extract_author(element)
 
-            # 작성자 프로필 링크
-            author_url = ""
-            actor_link = await element.query_selector(".update-components-actor__meta-link")
-            if not actor_link:
-                actor_link = await element.query_selector(".feed-shared-actor__container-link")
-            if actor_link:
-                href = await actor_link.get_attribute("href") or ""
-                if href:
-                    author_url = (
-                        f"https://www.linkedin.com{href}" if href.startswith("/") else href
-                    )
+            # 작성자 프로필 URL
+            author_url = await self._extract_author_url(element)
 
-            # 본문 텍스트
-            content_text = ""
-            text_el = await element.query_selector(".feed-shared-update-v2__description")
-            if not text_el:
-                text_el = await element.query_selector(".feed-shared-text")
-            if not text_el:
-                text_el = await element.query_selector('span[dir="ltr"]')
-            if text_el:
-                content_text = (await text_el.inner_text()).strip()
-
+            # 본문 텍스트: data-testid="expandable-text-box"
+            content_text = await self._extract_content(element)
             if not content_text:
                 return None
 
-            # "...더 보기" 클릭 시도
-            see_more = await element.query_selector(
-                "button.feed-shared-inline-show-more-text__button"
-            )
-            if see_more:
-                try:
-                    await see_more.click()
-                    await asyncio.sleep(0.5)
-                    if text_el:
-                        content_text = (await text_el.inner_text()).strip()
-                except Exception:
-                    pass
-
-            # 인게이지먼트
-            likes = await self._extract_count(
-                element, ".social-details-social-counts__reactions-count"
-            )
-            comments = await self._extract_count(
-                element, "button.social-details-social-counts__comments"
-            )
-            reposts = await self._extract_count(
-                element, "button.social-details-social-counts__reposts"
-            )
+            # 인게이지먼트: innerText에서 "반응 N", "댓글 N", "퍼온글 N" 패턴 추출
+            likes, comments, reposts = await self._extract_engagement(element)
 
             post_url = f"https://www.linkedin.com/feed/update/urn:li:activity:{activity_id}/"
 
@@ -207,16 +185,224 @@ class LinkedInCollector:
             logger.debug(f"[linkedin] 피드 항목 파싱 실패: {e}")
             return None
 
-    async def _extract_count(self, parent, selector: str) -> int:
+    async def _extract_activity_id(self, element) -> str:
+        """포스트 고유 ID를 추출한다."""
+        # 1순위: data-urn (레거시)
+        urn = await element.get_attribute("data-urn") or ""
+        if "urn:li:activity:" in urn:
+            return urn.split("urn:li:activity:")[-1]
+
+        # 2순위: componentkey에서 해시 추출
+        ck_el = await element.query_selector("[componentkey]")
+        if ck_el:
+            ck = await ck_el.get_attribute("componentkey") or ""
+            if ck:
+                return hashlib.md5(ck.encode()).hexdigest()[:16]
+
+        # 3순위: 프로필 링크의 activity ID
+        links = await element.query_selector_all("a[href]")
+        for link in links:
+            href = await link.get_attribute("href") or ""
+            if "activity" in href:
+                match = re.search(r"activity[:/](\d+)", href)
+                if match:
+                    return match.group(1)
+
+        # 4순위: 본문 텍스트 해시
+        try:
+            text = await element.inner_text()
+            if text and len(text) > 20:
+                return hashlib.md5(text[:200].encode()).hexdigest()[:16]
+        except Exception:
+            pass
+
+        return ""
+
+    async def _extract_author(self, element) -> str:
+        """작성자 이름을 추출한다."""
+        # 1순위: "~님의 게시물에 대한 관리 메뉴 열기" aria-label
+        try:
+            mgmt_btn = await element.query_selector(
+                'button[aria-label*="게시물에 대한 관리"]'
+            )
+            if mgmt_btn:
+                label = await mgmt_btn.get_attribute("aria-label") or ""
+                # "Douglas Guen 님의 게시물에 대한 관리 메뉴 열기" → "Douglas Guen"
+                match = re.match(r"(.+?)\s*님의 게시물", label)
+                if match:
+                    return match.group(1).strip()
+
+            # 영어 UI 대응: "Open control menu for post by ~"
+            mgmt_btn_en = await element.query_selector(
+                'button[aria-label*="control menu for post"]'
+            )
+            if mgmt_btn_en:
+                label = await mgmt_btn_en.get_attribute("aria-label") or ""
+                match = re.match(r"Open control menu for post by (.+)", label)
+                if match:
+                    return match.group(1).strip()
+        except Exception:
+            pass
+
+        # 2순위: "~님의 프로필 보기" aria-label (첫 번째)
+        try:
+            profile_svgs = await element.query_selector_all('[aria-label*="프로필 보기"]')
+            for svg in profile_svgs:
+                label = await svg.get_attribute("aria-label") or ""
+                match = re.match(r"(.+?)님의 프로필 보기", label)
+                if match:
+                    return match.group(1).strip()
+        except Exception:
+            pass
+
+        # 3순위: "회사 보기: ~" (기업 게시물)
+        try:
+            company_el = await element.query_selector('[aria-label*="회사 보기"]')
+            if company_el:
+                label = await company_el.get_attribute("aria-label") or ""
+                match = re.match(r"회사 보기:\s*(.+)", label)
+                if match:
+                    return match.group(1).strip()
+        except Exception:
+            pass
+
+        # 4순위: 레거시 선택자
+        try:
+            actor_el = await element.query_selector(
+                ".update-components-actor__name span:first-child"
+            )
+            if not actor_el:
+                actor_el = await element.query_selector(".feed-shared-actor__name")
+            if actor_el:
+                text = (await actor_el.inner_text()).strip()
+                return text.split("\n")[0].strip()
+        except Exception:
+            pass
+
+        return ""
+
+    async def _extract_author_url(self, element) -> str:
+        """작성자 프로필 URL을 추출한다."""
+        # /in/username 또는 /company/name 링크 찾기
+        links = await element.query_selector_all('a[href*="/in/"], a[href*="/company/"]')
+        for link in links:
+            href = await link.get_attribute("href") or ""
+            if "/in/" in href or "/company/" in href:
+                if href.startswith("/"):
+                    return f"https://www.linkedin.com{href}"
+                return href
+        return ""
+
+    async def _extract_content(self, element) -> str:
+        """본문 텍스트를 추출한다."""
+        # 1순위: data-testid="expandable-text-box"
+        text_el = await element.query_selector('[data-testid="expandable-text-box"]')
+
+        # 2순위: 레거시 선택자들
+        if not text_el:
+            text_el = await element.query_selector(".feed-shared-update-v2__description")
+        if not text_el:
+            text_el = await element.query_selector(".feed-shared-text")
+        if not text_el:
+            text_el = await element.query_selector('span[dir="ltr"]')
+
+        if not text_el:
+            return ""
+
+        content = (await text_el.inner_text()).strip()
+
+        # "...더 보기" 버튼 클릭 시도
+        try:
+            see_more = await element.query_selector(
+                'button[aria-label*="더 보기"], button[aria-label*="see more"], '
+                'button[aria-label*="See more"]'
+            )
+            if see_more:
+                await see_more.click()
+                await asyncio.sleep(0.5)
+                # 다시 읽기
+                text_el2 = await element.query_selector('[data-testid="expandable-text-box"]')
+                if text_el2:
+                    content = (await text_el2.inner_text()).strip()
+        except Exception:
+            pass
+
+        return content
+
+    async def _extract_engagement(self, element) -> tuple[int, int, int]:
+        """인게이지먼트(반응, 댓글, 퍼온글) 수를 추출한다."""
+        likes = 0
+        comments = 0
+        reposts = 0
+
+        try:
+            full_text = await element.inner_text()
+
+            # 한국어: "반응 39", "댓글 1", "퍼온글 1"
+            likes_match = re.search(r"반응\s+([\d,.]+(?:k|K)?)", full_text)
+            if likes_match:
+                likes = self._parse_count(likes_match.group(1))
+
+            comments_match = re.search(r"댓글\s+([\d,.]+(?:k|K)?)", full_text)
+            if comments_match:
+                comments = self._parse_count(comments_match.group(1))
+
+            reposts_match = re.search(r"퍼온글\s+([\d,.]+(?:k|K)?)", full_text)
+            if reposts_match:
+                reposts = self._parse_count(reposts_match.group(1))
+
+            # 영어 UI: "39 reactions", "1 comment", "1 repost"
+            if not likes_match:
+                en_likes = re.search(r"([\d,.]+(?:k|K)?)\s+reaction", full_text)
+                if en_likes:
+                    likes = self._parse_count(en_likes.group(1))
+
+            if not comments_match:
+                en_comments = re.search(r"([\d,.]+(?:k|K)?)\s+comment", full_text)
+                if en_comments:
+                    comments = self._parse_count(en_comments.group(1))
+
+            if not reposts_match:
+                en_reposts = re.search(r"([\d,.]+(?:k|K)?)\s+repost", full_text)
+                if en_reposts:
+                    reposts = self._parse_count(en_reposts.group(1))
+        except Exception:
+            pass
+
+        # 폴백: 레거시 CSS 선택자
+        if likes == 0:
+            likes = await self._extract_count_legacy(
+                element, ".social-details-social-counts__reactions-count"
+            )
+        if comments == 0:
+            comments = await self._extract_count_legacy(
+                element, "button.social-details-social-counts__comments"
+            )
+        if reposts == 0:
+            reposts = await self._extract_count_legacy(
+                element, "button.social-details-social-counts__reposts"
+            )
+
+        return likes, comments, reposts
+
+    @staticmethod
+    def _parse_count(text: str) -> int:
+        """숫자 텍스트를 정수로 변환한다. (예: "2.5K" → 2500)"""
+        text = text.strip().replace(",", "").replace(" ", "").lower()
+        if "k" in text:
+            return int(float(text.replace("k", "")) * 1000)
+        if "m" in text:
+            return int(float(text.replace("m", "")) * 1_000_000)
+        digits = "".join(c for c in text if c.isdigit())
+        return int(digits) if digits else 0
+
+    async def _extract_count_legacy(self, parent, selector: str) -> int:
+        """레거시 CSS 선택자로 인게이지먼트 수를 추출한다."""
         try:
             el = await parent.query_selector(selector)
             if el:
                 text = (await el.inner_text()).strip()
-                text = text.replace(",", "").replace(".", "").lower()
-                if "k" in text:
-                    return int(float(text.replace("k", "")) * 1000)
-                digits = "".join(c for c in text if c.isdigit())
-                return int(digits) if digits else 0
+                return self._parse_count(text)
         except Exception:
             pass
         return 0
