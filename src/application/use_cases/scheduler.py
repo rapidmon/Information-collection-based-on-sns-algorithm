@@ -76,6 +76,7 @@ class Orchestrator:
             id="daily_briefing",
             name="Daily Briefing",
             max_instances=1,
+            misfire_grace_time=600,
         )
         logger.info(f"일일 브리핑 등록: {daily_time}")
 
