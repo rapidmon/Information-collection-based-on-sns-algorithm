@@ -17,6 +17,7 @@ from src.domain.entities import Post
 from src.domain.services.ai_processor import CategoryResult, FilterResult, MergedTopic
 from src.infrastructure.ai.prompts import (
     CATEGORIZE,
+    CROSS_CHUNK_MERGE,
     DEDUPLICATE_AND_MERGE,
     FILTER_AND_SUMMARIZE,
     SYSTEM_PROMPT,
@@ -224,5 +225,90 @@ class OpenAIProcessor:
                         )
                     )
 
-        logger.info(f"중복제거/통합 완료: {len(posts)}건 → {len(all_results)}개 토픽 ({(len(posts)-1)//chunk_size + 1}개 청크)")
+        num_chunks = (len(posts) - 1) // chunk_size + 1
+        logger.info(f"1차 중복제거: {len(posts)}건 → {len(all_results)}개 토픽 ({num_chunks}개 청크)")
+
+        # 2차: 청크 간 중복 병합 (청크가 2개 이상이고 토픽이 2개 이상일 때만)
+        if num_chunks >= 2 and len(all_results) >= 2:
+            all_results = await self._cross_chunk_merge(all_results)
+
+        logger.info(f"최종 토픽 수: {len(all_results)}개")
         return all_results
+
+    async def _cross_chunk_merge(self, topics: list[MergedTopic]) -> list[MergedTopic]:
+        """청크 간 동일 사건 토픽을 2차 병합한다."""
+        # 토픽 headline + primary_category만 보내서 토큰 절약
+        topics_summary = []
+        for i, t in enumerate(topics):
+            topics_summary.append({
+                "index": i,
+                "headline": t.headline,
+                "category": t.primary_category,
+            })
+
+        topics_json = json.dumps(topics_summary, ensure_ascii=False, indent=2)
+        prompt = CROSS_CHUNK_MERGE.format(topics_json=topics_json)
+
+        try:
+            response_text = self._call_api(
+                self._config.model_process, prompt, max_tokens=4096
+            )
+            merge_groups = _parse_json_response(response_text)
+
+            if not merge_groups:
+                return topics
+
+            # 병합 실행
+            merged_indices: set[int] = set()
+            merged_topics: list[MergedTopic] = []
+
+            for group in merge_groups:
+                indices = group.get("merge_indices", [])
+                if len(indices) < 2:
+                    continue
+
+                # 유효 인덱스만
+                indices = [idx for idx in indices if 0 <= idx < len(topics)]
+                if len(indices) < 2:
+                    continue
+
+                # 첫 번째 토픽을 기준으로 나머지를 병합
+                base = topics[indices[0]]
+                combined_post_ids = list(base.post_ids)
+                combined_bullets = list(base.body_bullets)
+                combined_sources = list(base.sources)
+                combined_urls = list(base.source_urls)
+
+                for idx in indices[1:]:
+                    other = topics[idx]
+                    combined_post_ids.extend(other.post_ids)
+                    combined_bullets.extend(other.body_bullets)
+                    combined_sources.extend(other.sources)
+                    combined_urls.extend(other.source_urls)
+
+                # 중복 제거
+                combined_sources = list(dict.fromkeys(combined_sources))
+                combined_urls = list(dict.fromkeys(combined_urls))
+
+                merged_topics.append(MergedTopic(
+                    post_ids=combined_post_ids,
+                    headline=group.get("headline", base.headline),
+                    body_bullets=combined_bullets,
+                    primary_category=base.primary_category,
+                    importance_score=group.get("importance_score", base.importance_score),
+                    sources=combined_sources,
+                    source_urls=combined_urls,
+                ))
+                merged_indices.update(indices)
+
+            # 병합되지 않은 토픽 유지
+            for i, t in enumerate(topics):
+                if i not in merged_indices:
+                    merged_topics.append(t)
+
+            logger.info(f"2차 청크 간 병합: {len(topics)}개 → {len(merged_topics)}개 토픽")
+            return merged_topics
+
+        except Exception as e:
+            logger.warning(f"2차 청크 간 병합 실패 (원본 유지): {e}")
+            return topics
