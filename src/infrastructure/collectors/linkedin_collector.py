@@ -89,7 +89,7 @@ class LinkedInCollector:
                     feed_items = await self._get_feed_items(page)
 
                     for item in feed_items:
-                        post = await self._parse_feed_update(item)
+                        post = await self._parse_feed_update(item, page)
                         if post and post.external_id not in seen_ids:
                             seen_ids.add(post.external_id)
                             posts.append(post)
@@ -146,11 +146,11 @@ class LinkedInCollector:
                 result.append(children[idx])
         return result
 
-    async def _parse_feed_update(self, element) -> Post | None:
+    async def _parse_feed_update(self, element, page) -> Post | None:
         try:
-            # 포스트 ID 추출: componentkey → 텍스트 해시 폴백
-            activity_id = await self._extract_activity_id(element)
-            if not activity_id:
+            # 본문 텍스트: data-testid="expandable-text-box"
+            content_text = await self._extract_content(element)
+            if not content_text:
                 return None
 
             # 작성자 이름: "~님의 게시물에 대한 관리 메뉴 열기" 버튼의 aria-label에서 추출
@@ -159,19 +159,27 @@ class LinkedInCollector:
             # 작성자 프로필 URL
             author_url = await self._extract_author_url(element)
 
-            # 본문 텍스트: data-testid="expandable-text-box"
-            content_text = await self._extract_content(element)
-            if not content_text:
-                return None
+            # 포스트 URN 추출: 관리 메뉴 → embed 링크에서 실제 URN 획득
+            post_urn = await self._extract_post_urn(element, page)
+
+            # URN에서 ID와 URL 생성
+            if post_urn:
+                # urn:li:ugcPost:7434660713215885312 형태
+                post_id = post_urn.split(":")[-1]
+                external_id = f"li_{post_id}"
+                post_url = f"https://www.linkedin.com/feed/update/{post_urn}/"
+            else:
+                # 폴백: 본문 해시 (URL은 작성자 프로필로 대체)
+                fallback_id = hashlib.md5(content_text[:200].encode()).hexdigest()[:16]
+                external_id = f"li_{fallback_id}"
+                post_url = author_url or self.FEED_URL
 
             # 인게이지먼트: innerText에서 "반응 N", "댓글 N", "퍼온글 N" 패턴 추출
             likes, comments, reposts = await self._extract_engagement(element)
 
-            post_url = f"https://www.linkedin.com/feed/update/urn:li:activity:{activity_id}/"
-
             return Post(
                 source="linkedin",
-                external_id=f"li_{activity_id}",
+                external_id=external_id,
                 url=post_url,
                 author=author,
                 author_url=author_url or None,
@@ -185,36 +193,47 @@ class LinkedInCollector:
             logger.debug(f"[linkedin] 피드 항목 파싱 실패: {e}")
             return None
 
-    async def _extract_activity_id(self, element) -> str:
-        """포스트 고유 ID를 추출한다."""
+    async def _extract_post_urn(self, element, page) -> str:
+        """관리 메뉴의 '게시물 삽입' 링크에서 실제 포스트 URN을 추출한다."""
         # 1순위: data-urn (레거시)
         urn = await element.get_attribute("data-urn") or ""
-        if "urn:li:activity:" in urn:
-            return urn.split("urn:li:activity:")[-1]
+        if "urn:li:" in urn:
+            return urn
 
-        # 2순위: componentkey에서 해시 추출
-        ck_el = await element.query_selector("[componentkey]")
-        if ck_el:
-            ck = await ck_el.get_attribute("componentkey") or ""
-            if ck:
-                return hashlib.md5(ck.encode()).hexdigest()[:16]
-
-        # 3순위: 프로필 링크의 activity ID
-        links = await element.query_selector_all("a[href]")
-        for link in links:
-            href = await link.get_attribute("href") or ""
-            if "activity" in href:
-                match = re.search(r"activity[:/](\d+)", href)
-                if match:
-                    return match.group(1)
-
-        # 4순위: 본문 텍스트 해시
+        # 2순위: 관리 메뉴 열기 → embed 링크에서 URN 추출
         try:
-            text = await element.inner_text()
-            if text and len(text) > 20:
-                return hashlib.md5(text[:200].encode()).hexdigest()[:16]
-        except Exception:
-            pass
+            menu_btn = await element.query_selector(
+                'button[aria-label*="관리 메뉴"], button[aria-label*="control menu"]'
+            )
+            if menu_btn:
+                await menu_btn.click()
+                await asyncio.sleep(0.8)
+
+                # "게시물 삽입" 링크에서 targetUrn 파라미터 추출
+                embed_links = await page.query_selector_all('a[href*="embed-modal"]')
+                for link in embed_links:
+                    href = await link.get_attribute("href") or ""
+                    match = re.search(
+                        r"targetUrn=urn%3Ali%3A(ugcPost|activity)%3A(\d+)", href
+                    )
+                    if match:
+                        post_type = match.group(1)
+                        post_id = match.group(2)
+                        await page.keyboard.press("Escape")
+                        await asyncio.sleep(0.3)
+                        return f"urn:li:{post_type}:{post_id}"
+
+                # 메뉴 닫기
+                await page.keyboard.press("Escape")
+                await asyncio.sleep(0.3)
+        except Exception as e:
+            logger.debug(f"[linkedin] 관리 메뉴 URN 추출 실패: {e}")
+            # 메뉴가 열려있을 수 있으므로 닫기 시도
+            try:
+                await page.keyboard.press("Escape")
+                await asyncio.sleep(0.3)
+            except Exception:
+                pass
 
         return ""
 
