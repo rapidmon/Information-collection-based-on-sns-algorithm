@@ -63,7 +63,7 @@ categories:
 
 processing:
   model_filter: "gpt-4o-mini"
-  model_process: "gpt-4o-mini"
+  model_process: "gpt-5-mini"
   batch_size_filter: 20
   batch_size_summarize: 15
   batch_size_categorize: 20
