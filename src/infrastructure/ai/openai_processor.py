@@ -14,13 +14,17 @@ from typing import Any
 from openai import OpenAI
 
 from src.domain.entities import Post
-from src.domain.services.ai_processor import CategoryResult, FilterResult, MergedTopic
+from duckduckgo_search import DDGS
+
+from src.domain.services.ai_processor import CategoryResult, FilterResult, MergedTopic, VerificationResult
 from src.infrastructure.ai.prompts import (
     CATEGORIZE,
     CROSS_CHUNK_MERGE,
     DEDUPLICATE_AND_MERGE,
+    EXTRACT_CLAIMS,
     FILTER_AND_SUMMARIZE,
     SYSTEM_PROMPT,
+    VERIFY_CLAIMS,
 )
 from src.infrastructure.config.settings import ProcessingConfig
 
@@ -177,6 +181,98 @@ class OpenAIProcessor:
 
         logger.info(f"분류 완료: {len(results)}건")
         return results
+
+    async def verify_claims(self, posts: list[Post]) -> list[VerificationResult]:
+        """게시물의 핵심 주장을 웹 검색으로 교차 검증."""
+        if not posts:
+            return []
+
+        # 1단계: GPT로 검증이 필요한 핵심 주장 추출
+        posts_json = _posts_to_json_lite(posts)
+        prompt = EXTRACT_CLAIMS.format(posts_json=posts_json)
+
+        try:
+            response_text = self._call_api(self._config.model_filter, prompt)
+            claims = _parse_json_response(response_text)
+        except Exception as e:
+            logger.warning(f"주장 추출 실패 (검증 스킵): {e}")
+            return [
+                VerificationResult(post_id=p.id, credibility="verified")
+                for p in posts
+            ]
+
+        # 검증 필요한 주장만 필터
+        claims_to_verify = [
+            c for c in claims
+            if c.get("needs_verification") and c.get("claim")
+        ]
+
+        if not claims_to_verify:
+            logger.info("검증 필요한 주장 없음, 전체 통과")
+            return [
+                VerificationResult(post_id=p.id, credibility="verified")
+                for p in posts
+            ]
+
+        # 2단계: 웹 검색으로 각 주장 검증
+        verification_data = []
+        for claim_item in claims_to_verify:
+            search_results = self._web_search(claim_item["claim"])
+            verification_data.append({
+                "post_id": claim_item["post_id"],
+                "claim": claim_item["claim"],
+                "search_results": search_results,
+            })
+
+        # 3단계: GPT로 원문 vs 검색 결과 비교 판정
+        verification_json = json.dumps(verification_data, ensure_ascii=False, indent=2)
+        verify_prompt = VERIFY_CLAIMS.format(verification_data=verification_json)
+
+        results: list[VerificationResult] = []
+        verified_ids: set = set()
+
+        try:
+            response_text = self._call_api(self._config.model_process, verify_prompt)
+            parsed = _parse_json_response(response_text)
+
+            for item in parsed:
+                results.append(VerificationResult(
+                    post_id=item["post_id"],
+                    credibility=item.get("credibility", "unverified"),
+                    reason=item.get("reason"),
+                ))
+                verified_ids.add(item["post_id"])
+        except Exception as e:
+            logger.warning(f"신뢰도 판정 실패 (검증 스킵): {e}")
+
+        # 검증 대상이 아닌 게시물은 verified로 처리
+        for p in posts:
+            if p.id not in verified_ids:
+                results.append(VerificationResult(
+                    post_id=p.id, credibility="verified"
+                ))
+
+        contradicted = sum(1 for r in results if r.credibility == "contradicted")
+        unverified = sum(1 for r in results if r.credibility == "unverified")
+        verified = sum(1 for r in results if r.credibility == "verified")
+        logger.info(
+            f"신뢰도 검증 완료: {len(results)}건 "
+            f"(검증됨: {verified}, 미검증: {unverified}, 허위/스캠: {contradicted})"
+        )
+        return results
+
+    def _web_search(self, query: str, max_results: int = 5) -> list[dict]:
+        """DuckDuckGo로 웹 검색하여 결과 반환."""
+        try:
+            with DDGS() as ddgs:
+                results = list(ddgs.text(query, max_results=max_results))
+            return [
+                {"title": r.get("title", ""), "body": r.get("body", ""), "href": r.get("href", "")}
+                for r in results
+            ]
+        except Exception as e:
+            logger.warning(f"웹 검색 실패 '{query[:50]}': {e}")
+            return []
 
     async def deduplicate_and_merge(self, posts: list[Post]) -> list[MergedTopic]:
         """중복 제거 + 토픽 통합 (GPT-4o 사용, 청킹)."""

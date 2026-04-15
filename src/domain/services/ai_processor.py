@@ -23,6 +23,13 @@ class CategoryResult:
 
 
 @dataclass
+class VerificationResult:
+    post_id: int
+    credibility: str  # "verified" | "unverified" | "contradicted"
+    reason: str | None = None
+
+
+@dataclass
 class MergedTopic:
     post_ids: list[int]
     headline: str
@@ -46,6 +53,10 @@ class AIProcessor(Protocol):
 
     async def categorize(self, posts: list[Post]) -> list[CategoryResult]:
         """카테고리 분류 + 중요도 점수 (배치)."""
+        ...
+
+    async def verify_claims(self, posts: list[Post]) -> list[VerificationResult]:
+        """게시물의 핵심 주장을 웹 검색으로 교차 검증."""
         ...
 
     async def deduplicate_and_merge(self, posts: list[Post]) -> list[MergedTopic]:

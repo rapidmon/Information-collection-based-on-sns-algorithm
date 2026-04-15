@@ -9,6 +9,7 @@ lxml==5.3.0
 
 # AI Processing
 openai==1.58.1
+duckduckgo-search==7.5.3
 
 # Web Framework
 fastapi==0.115.6

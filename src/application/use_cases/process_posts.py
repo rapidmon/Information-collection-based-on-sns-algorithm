@@ -64,7 +64,31 @@ class ProcessPostsUseCase:
                 post.summary = "[filtered]"
                 irrelevant_posts.append(post)
 
-        # 2. 관련 게시물만 분류 + 중요도
+        # 2. 웹 검색 교차 검증 (스캠/허위 정보 필터링)
+        if relevant_posts:
+            verification_results = await self._ai.verify_claims(relevant_posts)
+            verify_map = {r.post_id: r for r in verification_results}
+
+            verified_posts = []
+            for post in relevant_posts:
+                vr = verify_map.get(post.id)
+                if vr and vr.credibility == "contradicted":
+                    # 허위/스캠으로 판별된 게시물은 비관련으로 전환
+                    post.is_relevant = False
+                    post.summary = f"[신뢰도 검증 실패] {vr.reason or ''}"
+                    irrelevant_posts.append(post)
+                    logger.info(f"스캠/허위 필터링: post_id={post.id}, 사유={vr.reason}")
+                else:
+                    verified_posts.append(post)
+
+            if len(verified_posts) < len(relevant_posts):
+                logger.info(
+                    f"신뢰도 검증: {len(relevant_posts)}건 → {len(verified_posts)}건 "
+                    f"({len(relevant_posts) - len(verified_posts)}건 필터링)"
+                )
+            relevant_posts = verified_posts
+
+        # 3. 관련 게시물만 분류 + 중요도
         if relevant_posts:
             cat_results = await self._ai.categorize(relevant_posts)
             cat_map = {r.post_id: r for r in cat_results}
@@ -75,7 +99,7 @@ class ProcessPostsUseCase:
                     post.importance_score = cr.importance_score
                     post.keywords = cr.keywords or []
 
-        # 3. 관련/비관련 게시물 모두 DB 업데이트 (재처리 방지)
+        # 4. 관련/비관련 게시물 모두 DB 업데이트 (재처리 방지)
         updated = 0
         all_processed = relevant_posts + irrelevant_posts
         if all_processed:
