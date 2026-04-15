@@ -37,6 +37,23 @@ def _chunked(lst: list, size: int):
         yield lst[i : i + size]
 
 
+# catch-all 토픽 판별용 — 이런 단어가 headline에 들어있고 source_count가 많으면 잡동사니 묶음으로 간주
+_VAGUE_HEADLINE_PATTERNS = [
+    "관련 주요 동향", "관련 동향", "다양한 업데이트", "다양한 발표",
+    "업계 소식", "주요 소식", "최근 동향", "여러 기업", "여러 발표",
+    "종합", "모음", "정리", "트렌드 요약",
+]
+
+
+def _is_catch_all(headline: str, post_count: int) -> bool:
+    """모호한 headline + 과다한 출처 수 → catch-all 버킷으로 판정."""
+    if post_count < 4:
+        return False
+    if not headline:
+        return True
+    return any(p in headline for p in _VAGUE_HEADLINE_PATTERNS)
+
+
 def _posts_to_json(posts: list[Post]) -> str:
     """Post 리스트를 프롬프트에 삽입할 JSON 문자열로 변환 (캐싱)."""
     items = []
@@ -283,6 +300,7 @@ class OpenAIProcessor:
         chunk_size = self._config.dedup_chunk_size
 
         for i, chunk in enumerate(_chunked(posts, chunk_size)):
+            post_map = {str(p.id): p for p in chunk if p.id is not None}
             posts_json = _posts_to_json_lite(chunk)
             prompt = DEDUPLICATE_AND_MERGE.format(posts_json=posts_json)
 
@@ -293,10 +311,35 @@ class OpenAIProcessor:
                 parsed = _parse_json_response(response_text)
 
                 for item in parsed:
+                    post_ids = item.get("post_ids", [])
+                    headline = item.get("headline", "")
+                    # 출력 검증: catch-all 버킷 또는 과다 묶음(>4)은 개별 토픽으로 분해
+                    if _is_catch_all(headline, len(post_ids)) or len(post_ids) > 4:
+                        logger.warning(
+                            f"청크 {i+1}: 의심 토픽 분해 — headline='{headline[:60]}', "
+                            f"post_count={len(post_ids)}"
+                        )
+                        for pid in post_ids:
+                            p = post_map.get(str(pid))
+                            if p is None:
+                                continue
+                            all_results.append(
+                                MergedTopic(
+                                    post_ids=[p.id],
+                                    headline=p.summary or (p.content_text or "")[:100],
+                                    body_bullets=[p.summary or (p.content_text or "")[:300]],
+                                    primary_category=p.category_names[0] if p.category_names else "Other",
+                                    importance_score=p.importance_score or 0.5,
+                                    sources=[p.source],
+                                    source_urls=[p.url] if p.url else [],
+                                )
+                            )
+                        continue
+
                     all_results.append(
                         MergedTopic(
-                            post_ids=item.get("post_ids", []),
-                            headline=item.get("headline", ""),
+                            post_ids=post_ids,
+                            headline=headline,
                             body_bullets=item.get("body_bullets", []),
                             primary_category=item.get("primary_category", "Other"),
                             importance_score=item.get("importance_score", 0.5),
