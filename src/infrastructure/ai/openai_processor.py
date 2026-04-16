@@ -313,10 +313,11 @@ class OpenAIProcessor:
                 for item in parsed:
                     post_ids = item.get("post_ids", [])
                     headline = item.get("headline", "")
-                    # 출력 검증: catch-all 버킷 또는 과다 묶음(>4)은 개별 토픽으로 분해
-                    if _is_catch_all(headline, len(post_ids)) or len(post_ids) > 4:
+                    # 출력 검증: 모호한 headline의 catch-all 버킷만 개별 토픽으로 분해
+                    # (post_ids가 많아도 같은 사건 다출처 보도면 정당하므로 headline 내용으로만 판정)
+                    if _is_catch_all(headline, len(post_ids)):
                         logger.warning(
-                            f"청크 {i+1}: 의심 토픽 분해 — headline='{headline[:60]}', "
+                            f"청크 {i+1}: catch-all 토픽 분해 — headline='{headline[:60]}', "
                             f"post_count={len(post_ids)}"
                         )
                         for pid in post_ids:
@@ -376,12 +377,14 @@ class OpenAIProcessor:
 
     async def _cross_chunk_merge(self, topics: list[MergedTopic]) -> list[MergedTopic]:
         """청크 간 동일 사건 토픽을 2차 병합한다."""
-        # 토픽 headline + primary_category만 보내서 토큰 절약
+        # headline + 본문 첫 불릿을 함께 보내 의미 기반 동일성 판정 정확도 향상
         topics_summary = []
         for i, t in enumerate(topics):
+            first_bullet = t.body_bullets[0] if t.body_bullets else ""
             topics_summary.append({
                 "index": i,
                 "headline": t.headline,
+                "summary": first_bullet[:200],
                 "category": t.primary_category,
             })
 
