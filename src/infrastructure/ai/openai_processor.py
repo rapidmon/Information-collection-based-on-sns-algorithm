@@ -116,15 +116,19 @@ class OpenAIProcessor:
 
     def _call_api(self, model: str, prompt: str, max_tokens: int = 4096) -> str:
         """OpenAI Chat Completions API 동기 호출."""
-        response = self._client.chat.completions.create(
-            model=model,
-            max_tokens=max_tokens,
-            temperature=0.1,
-            messages=[
+        params: dict = {
+            "model": model,
+            "temperature": 0.1,
+            "messages": [
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": prompt},
             ],
-        )
+        }
+        if "gpt-4o" in model:
+            params["max_tokens"] = max_tokens
+        else:
+            params["max_completion_tokens"] = max_tokens
+        response = self._client.chat.completions.create(**params)
         return response.choices[0].message.content
 
     async def filter_and_summarize(self, posts: list[Post]) -> list[FilterResult]:

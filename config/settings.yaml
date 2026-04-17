@@ -75,7 +75,7 @@ processing:
 
 briefing:
   daily_time: "09:00"
-  max_items: 0
+  max_items: 50
   include_stats: true
 
 email:
