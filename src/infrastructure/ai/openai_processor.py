@@ -380,82 +380,153 @@ class OpenAIProcessor:
         logger.info(f"최종 토픽 수: {len(all_results)}개")
         return all_results
 
+    @staticmethod
+    def _extract_key_tokens(headline: str) -> set[str]:
+        """headline에서 핵심 토큰(고유명사, 숫자 포함 단어)을 추출."""
+        tokens = re.findall(r'[A-Za-z0-9가-힣]+', headline)
+        stop = {"의", "이", "가", "을", "를", "에", "는", "은", "및", "등", "로", "와", "과",
+                "출시", "발표", "공개", "업데이트", "관련", "기술", "주요", "관한", "대한"}
+        return {t for t in tokens if len(t) >= 2 and t.lower() not in stop}
+
+    def _find_merge_candidates(self, topics: list[MergedTopic]) -> list[list[int]]:
+        """headline 토큰 유사도로 병합 후보군을 찾는다 (LLM 호출 없이)."""
+        token_sets = [self._extract_key_tokens(t.headline) for t in topics]
+        n = len(topics)
+        parent = list(range(n))
+
+        def find(x: int) -> int:
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        def union(a: int, b: int) -> None:
+            ra, rb = find(a), find(b)
+            if ra != rb:
+                parent[ra] = rb
+
+        for i in range(n):
+            if not token_sets[i]:
+                continue
+            for j in range(i + 1, n):
+                if not token_sets[j]:
+                    continue
+                intersection = token_sets[i] & token_sets[j]
+                smaller = min(len(token_sets[i]), len(token_sets[j]))
+                if smaller > 0 and len(intersection) >= 3 and len(intersection) / smaller >= 0.3:
+                    union(i, j)
+
+        groups: dict[int, list[int]] = {}
+        for i in range(n):
+            root = find(i)
+            groups.setdefault(root, []).append(i)
+
+        return [indices for indices in groups.values() if len(indices) >= 2]
+
+    @staticmethod
+    def _merge_topic_group(topics: list[MergedTopic], indices: list[int]) -> MergedTopic:
+        """토픽 인덱스 그룹을 하나의 MergedTopic으로 병합."""
+        base = topics[indices[0]]
+        combined_post_ids = []
+        combined_bullets = []
+        combined_sources = []
+        combined_urls = []
+        best_score = 0.0
+        best_headline = base.headline
+
+        for idx in indices:
+            t = topics[idx]
+            combined_post_ids.extend(t.post_ids)
+            combined_bullets.extend(t.body_bullets)
+            combined_sources.extend(t.sources)
+            combined_urls.extend(t.source_urls)
+            if t.importance_score > best_score:
+                best_score = t.importance_score
+                best_headline = t.headline
+
+        combined_sources = list(dict.fromkeys(combined_sources))
+        combined_urls = list(dict.fromkeys(combined_urls))
+
+        return MergedTopic(
+            post_ids=combined_post_ids,
+            headline=best_headline,
+            body_bullets=combined_bullets,
+            primary_category=base.primary_category,
+            importance_score=best_score,
+            sources=combined_sources,
+            source_urls=combined_urls,
+        )
+
     async def _cross_chunk_merge(self, topics: list[MergedTopic]) -> list[MergedTopic]:
-        """청크 간 동일 사건 토픽을 2차 병합한다."""
-        # headline + 본문 첫 불릿을 함께 보내 의미 기반 동일성 판정 정확도 향상
-        topics_summary = []
-        for i, t in enumerate(topics):
-            first_bullet = t.body_bullets[0] if t.body_bullets else ""
-            topics_summary.append({
-                "index": i,
-                "headline": t.headline,
-                "summary": first_bullet[:200],
-                "category": t.primary_category,
-            })
+        """청크 간 동일 사건 토픽을 2차 병합한다.
 
-        topics_json = json.dumps(topics_summary, ensure_ascii=False, indent=2)
-        prompt = CROSS_CHUNK_MERGE.format(topics_json=topics_json)
+        1단계: headline 토큰 유사도로 후보군 탐색 (빠르고 확실한 매칭)
+        2단계: 후보군 내에서 LLM으로 최종 병합 판정 (의미 기반 검증)
+        """
+        candidate_groups = self._find_merge_candidates(topics)
 
-        try:
-            response_text = self._call_api(
-                self._config.model_process, prompt, max_tokens=4096
-            )
-            merge_groups = _parse_json_response(response_text)
-
-            if not merge_groups:
-                return topics
-
-            # 병합 실행
-            merged_indices: set[int] = set()
-            merged_topics: list[MergedTopic] = []
-
-            for group in merge_groups:
-                indices = group.get("merge_indices", [])
-                if len(indices) < 2:
-                    continue
-
-                # 유효 인덱스만
-                indices = [idx for idx in indices if 0 <= idx < len(topics)]
-                if len(indices) < 2:
-                    continue
-
-                # 첫 번째 토픽을 기준으로 나머지를 병합
-                base = topics[indices[0]]
-                combined_post_ids = list(base.post_ids)
-                combined_bullets = list(base.body_bullets)
-                combined_sources = list(base.sources)
-                combined_urls = list(base.source_urls)
-
-                for idx in indices[1:]:
-                    other = topics[idx]
-                    combined_post_ids.extend(other.post_ids)
-                    combined_bullets.extend(other.body_bullets)
-                    combined_sources.extend(other.sources)
-                    combined_urls.extend(other.source_urls)
-
-                # 중복 제거
-                combined_sources = list(dict.fromkeys(combined_sources))
-                combined_urls = list(dict.fromkeys(combined_urls))
-
-                merged_topics.append(MergedTopic(
-                    post_ids=combined_post_ids,
-                    headline=group.get("headline", base.headline),
-                    body_bullets=combined_bullets,
-                    primary_category=base.primary_category,
-                    importance_score=group.get("importance_score", base.importance_score),
-                    sources=combined_sources,
-                    source_urls=combined_urls,
-                ))
-                merged_indices.update(indices)
-
-            # 병합되지 않은 토픽 유지
-            for i, t in enumerate(topics):
-                if i not in merged_indices:
-                    merged_topics.append(t)
-
-            logger.info(f"2차 청크 간 병합: {len(topics)}개 → {len(merged_topics)}개 토픽")
-            return merged_topics
-
-        except Exception as e:
-            logger.warning(f"2차 청크 간 병합 실패 (원본 유지): {e}")
+        if not candidate_groups:
+            logger.info("2차 청크 간 병합: 병합 후보 없음")
             return topics
+
+        logger.info(f"2차 청크 간 병합: {len(candidate_groups)}개 후보군 발견")
+
+        merged_indices: set[int] = set()
+        merged_topics: list[MergedTopic] = []
+
+        for group_indices in candidate_groups:
+            if len(group_indices) <= 3:
+                merged_topics.append(self._merge_topic_group(topics, group_indices))
+                merged_indices.update(group_indices)
+                continue
+
+            # 4개 이상이면 LLM으로 세부 검증
+            group_summary = []
+            for idx in group_indices:
+                t = topics[idx]
+                first_bullet = t.body_bullets[0] if t.body_bullets else ""
+                group_summary.append({
+                    "index": idx,
+                    "headline": t.headline,
+                    "summary": first_bullet[:200],
+                    "category": t.primary_category,
+                })
+
+            topics_json = json.dumps(group_summary, ensure_ascii=False, indent=2)
+            prompt = CROSS_CHUNK_MERGE.format(topics_json=topics_json)
+
+            try:
+                response_text = self._call_api(
+                    self._config.model_process, prompt, max_tokens=4096
+                )
+                sub_groups = _parse_json_response(response_text)
+
+                if sub_groups:
+                    sub_merged: set[int] = set()
+                    for sg in sub_groups:
+                        sg_indices = [i for i in sg.get("merge_indices", []) if 0 <= i < len(topics)]
+                        if len(sg_indices) >= 2:
+                            result = self._merge_topic_group(topics, sg_indices)
+                            if sg.get("headline"):
+                                result.headline = sg["headline"]
+                            merged_topics.append(result)
+                            sub_merged.update(sg_indices)
+                    merged_indices.update(sub_merged)
+                    for idx in group_indices:
+                        if idx not in sub_merged:
+                            pass  # 아래 병합되지 않은 토픽 유지에서 처리
+                else:
+                    merged_topics.append(self._merge_topic_group(topics, group_indices))
+                    merged_indices.update(group_indices)
+
+            except Exception as e:
+                logger.warning(f"후보군 LLM 검증 실패, 토큰 매칭 기준으로 병합: {e}")
+                merged_topics.append(self._merge_topic_group(topics, group_indices))
+                merged_indices.update(group_indices)
+
+        for i, t in enumerate(topics):
+            if i not in merged_indices:
+                merged_topics.append(t)
+
+        logger.info(f"2차 청크 간 병합: {len(topics)}개 → {len(merged_topics)}개 토픽")
+        return merged_topics
