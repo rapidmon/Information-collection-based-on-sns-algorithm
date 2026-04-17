@@ -116,16 +116,17 @@ class OpenAIProcessor:
 
     def _call_api(self, model: str, prompt: str, max_tokens: int = 4096) -> str:
         """OpenAI Chat Completions API 동기 호출."""
+        is_legacy = "gpt-4o" in model
         params: dict = {
             "model": model,
-            "temperature": 0.1,
             "messages": [
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": prompt},
             ],
         }
-        if "gpt-4o" in model:
+        if is_legacy:
             params["max_tokens"] = max_tokens
+            params["temperature"] = 0.1
         else:
             params["max_completion_tokens"] = max_tokens
         response = self._client.chat.completions.create(**params)
