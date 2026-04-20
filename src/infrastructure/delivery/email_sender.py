@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
@@ -15,6 +16,8 @@ from src.domain.entities import Briefing
 from src.infrastructure.config.settings import EmailConfig, Settings
 
 logger = logging.getLogger(__name__)
+
+ALERT_COOLDOWN_SECONDS = 3600
 
 
 class EmailNotifier:
@@ -28,6 +31,7 @@ class EmailNotifier:
         self._from = settings.email_from
         self._to_addresses = email_config.to_addresses
         self._enabled = email_config.enabled
+        self._alert_last_sent: dict[str, float] = {}
 
     async def send_briefing(self, briefing: Briefing) -> bool:
         """브리핑을 이메일로 전송."""
@@ -72,8 +76,14 @@ class EmailNotifier:
             return False
 
     async def send_alert(self, title: str, message: str) -> bool:
-        """시스템 알림 이메일 전송."""
+        """시스템 알림 이메일 전송 (동일 제목 1시간 쿨다운)."""
         if not self._enabled or not self._to_addresses:
+            return False
+
+        now = time.monotonic()
+        last = self._alert_last_sent.get(title, 0)
+        if now - last < ALERT_COOLDOWN_SECONDS:
+            logger.info(f"알림 쿨다운 중 (전송 생략): {title}")
             return False
 
         try:
@@ -91,6 +101,7 @@ class EmailNotifier:
                 username=self._user,
                 password=self._password,
             )
+            self._alert_last_sent[title] = now
             return True
 
         except Exception as e:
