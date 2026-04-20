@@ -21,19 +21,42 @@ async def cdp_connection(
     """Chrome CDP 연결 context manager.
 
     Yields (playwright, context). 종료 시 playwright를 정리한다.
+    첫 연결 실패 시 기존 탭을 reload한 뒤 한 번 재시도한다.
     """
     pw = await async_playwright().start()
     try:
         browser = await pw.chromium.connect_over_cdp(cdp_url)
-    except Exception as e:
-        await pw.stop()
-        logger.error(f"[{source_name}] Chrome 연결 실패: {e}")
-        raise
+    except Exception:
+        try:
+            browser = await _reload_and_reconnect(pw, cdp_url, source_name)
+        except Exception as e:
+            await pw.stop()
+            logger.error(f"[{source_name}] Chrome 연결 실패: {e}")
+            raise
 
     try:
         yield pw, browser.contexts[0]
     finally:
         await pw.stop()
+
+
+async def _reload_and_reconnect(pw: Playwright, cdp_url: str, source_name: str):
+    """CDP 타임아웃 시 빈 탭을 열어 Chrome을 깨운 뒤 재연결한다."""
+    import asyncio
+    import httpx
+
+    logger.info(f"[{source_name}] CDP 응답 없음 — Chrome 활성화 후 재시도")
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.get(f"{cdp_url}/json/new?about:blank")
+            new_tab_id = resp.json().get("id")
+            if new_tab_id:
+                await client.get(f"{cdp_url}/json/close/{new_tab_id}")
+    except Exception:
+        pass
+
+    await asyncio.sleep(3)
+    return await pw.chromium.connect_over_cdp(cdp_url)
 
 
 async def check_session(
