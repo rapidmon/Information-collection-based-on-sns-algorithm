@@ -41,22 +41,57 @@ async def cdp_connection(
 
 
 async def _reload_and_reconnect(pw: Playwright, cdp_url: str, source_name: str):
-    """CDP 타임아웃 시 빈 탭을 열어 Chrome을 깨운 뒤 재연결한다."""
+    """CDP 타임아웃 시 Chrome을 재시작한 뒤 재연결한다."""
     import asyncio
-    import httpx
+    import subprocess
 
-    logger.info(f"[{source_name}] CDP 응답 없음 — Chrome 활성화 후 재시도")
+    logger.info(f"[{source_name}] CDP 응답 없음 — Chrome 재시작 후 재시도")
+
+    # 기존 Chrome 프로세스에서 user-data-dir 추출
+    user_data_dir = _get_chrome_user_data_dir()
+
     try:
-        async with httpx.AsyncClient(timeout=5) as client:
-            resp = await client.get(f"{cdp_url}/json/new?about:blank")
-            new_tab_id = resp.json().get("id")
-            if new_tab_id:
-                await client.get(f"{cdp_url}/json/close/{new_tab_id}")
+        subprocess.run(["taskkill", "/F", "/IM", "chrome.exe"], capture_output=True, timeout=5)
     except Exception:
         pass
 
-    await asyncio.sleep(3)
+    await asyncio.sleep(2)
+
+    try:
+        subprocess.Popen(
+            [
+                r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                "--remote-debugging-port=9222",
+                f"--user-data-dir={user_data_dir}",
+                "--restore-last-session",
+            ],
+        )
+    except Exception as e:
+        logger.error(f"[{source_name}] Chrome 재시작 실패: {e}")
+        raise
+
+    await asyncio.sleep(5)
     return await pw.chromium.connect_over_cdp(cdp_url)
+
+
+def _get_chrome_user_data_dir() -> str:
+    """실행 중인 Chrome의 --user-data-dir 값을 추출한다."""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["wmic", "process", "where",
+             "name='chrome.exe' and commandline like '%remote-debugging%'",
+             "get", "commandline"],
+            capture_output=True, text=True, timeout=5,
+        )
+        for line in result.stdout.splitlines():
+            if "--user-data-dir=" in line:
+                for part in line.split():
+                    if part.startswith("--user-data-dir="):
+                        return part.split("=", 1)[1].strip('"')
+    except Exception:
+        pass
+    return r"C:\chrome_temp"
 
 
 async def check_session(

@@ -172,7 +172,7 @@ class OpenAIProcessor:
         return results
 
     async def categorize(self, posts: list[Post]) -> list[CategoryResult]:
-        """카테고리 분류 + 중요도 (GPT-4o 사용, 배치)."""
+        """카테고리 분류 + 중요도 (gpt-4o-mini 사용, 배치)."""
         results: list[CategoryResult] = []
 
         for batch in _chunked(posts, self._config.batch_size_categorize):
@@ -180,7 +180,7 @@ class OpenAIProcessor:
             prompt = CATEGORIZE.format(posts_json=posts_json)
 
             try:
-                response_text = self._call_api(self._config.model_process, prompt)
+                response_text = self._call_api(self._config.model_filter, prompt)
                 parsed = _parse_json_response(response_text)
 
                 for item in parsed:
@@ -254,7 +254,7 @@ class OpenAIProcessor:
         verified_ids: set = set()
 
         try:
-            response_text = self._call_api(self._config.model_process, verify_prompt)
+            response_text = self._call_api(self._config.model_filter, verify_prompt)
             parsed = _parse_json_response(response_text)
 
             for item in parsed:
