@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 from bs4 import BeautifulSoup, Tag
@@ -174,6 +174,15 @@ class DCInsideCollector:
             if count_text.isdigit():
                 views = int(count_text)
 
+        # 게시일: td.gall_date의 title 속성("YYYY-MM-DD HH:MM:SS")에서 추출
+        published_at = self._parse_post_date(row)
+
+        # 게시일 컷오프 — max_age_days 초과면 스킵 (KST 기준 비교)
+        if published_at:
+            cutoff = datetime.now() - timedelta(days=self._config.max_age_days)
+            if published_at < cutoff:
+                return None
+
         post_url = (
             f"https://gall.dcinside.com/mgallery/board/view/"
             f"?id={self._gallery_id}&no={post_no}"
@@ -187,8 +196,44 @@ class DCInsideCollector:
             content_text=title,
             engagement_comments=comment_count,
             engagement_views=views,
+            published_at=published_at,
             collected_at=datetime.utcnow(),
         )
+
+    @staticmethod
+    def _parse_post_date(row: Tag) -> Optional[datetime]:
+        """td.gall_date에서 게시일을 추출. title 속성 우선, 없으면 텍스트."""
+        date_td = row.select_one("td.gall_date")
+        if not date_td:
+            return None
+
+        # title="2024-04-30 14:23:45" 또는 "2024-04-30"
+        title_attr = date_td.get("title", "").strip()
+        if title_attr:
+            for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+                try:
+                    return datetime.strptime(title_attr, fmt)
+                except ValueError:
+                    continue
+
+        # 폴백: 텍스트 ("HH:MM" 당일 / "MM.DD" 다른 날)
+        text = date_td.get_text(strip=True)
+        if not text:
+            return None
+        now = datetime.now()
+        if ":" in text:  # 당일
+            try:
+                hh, mm = text.split(":")
+                return now.replace(hour=int(hh), minute=int(mm), second=0, microsecond=0)
+            except (ValueError, IndexError):
+                return None
+        if "." in text:  # MM.DD
+            try:
+                mo, da = text.split(".")
+                return datetime(now.year, int(mo), int(da))
+            except (ValueError, IndexError):
+                return None
+        return None
 
     def _parse_detail_page(self, html: str) -> tuple[str, list[str]]:
         """데스크톱 상세 페이지에서 본문과 이미지를 추출."""
