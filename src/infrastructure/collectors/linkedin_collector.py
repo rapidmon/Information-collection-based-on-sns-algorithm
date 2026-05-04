@@ -11,7 +11,8 @@ import hashlib
 import logging
 import random
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
+from typing import Optional
 
 from src.domain.entities import Post
 from src.domain.exceptions import SessionExpiredError
@@ -153,6 +154,13 @@ class LinkedInCollector:
             if not content_text:
                 return None
 
+            # 게시일 추출 (상대 시간 → datetime). 너무 오래된 건 빠르게 컷오프
+            published_at = await self._extract_published_at(element)
+            if published_at:
+                cutoff = datetime.utcnow() - timedelta(days=self._config.max_age_days)
+                if published_at < cutoff:
+                    return None
+
             # 작성자 이름: "~님의 게시물에 대한 관리 메뉴 열기" 버튼의 aria-label에서 추출
             author = await self._extract_author(element)
 
@@ -187,11 +195,46 @@ class LinkedInCollector:
                 engagement_likes=likes,
                 engagement_reposts=reposts,
                 engagement_comments=comments,
+                published_at=published_at,
                 collected_at=datetime.utcnow(),
             )
         except Exception as e:
             logger.debug(f"[linkedin] 피드 항목 파싱 실패: {e}")
             return None
+
+    async def _extract_published_at(self, element) -> Optional[datetime]:
+        """게시물 작성 시간을 추출. <time>의 datetime 속성 우선, 없으면 상대 시간 파싱."""
+        # 1순위: <time> 태그의 datetime 속성 (절대 시간)
+        try:
+            time_el = await element.query_selector("time[datetime]")
+            if time_el:
+                dt_attr = await time_el.get_attribute("datetime") or ""
+                if dt_attr:
+                    try:
+                        return datetime.fromisoformat(dt_attr.replace("Z", "+00:00")).replace(tzinfo=None)
+                    except ValueError:
+                        pass
+        except Exception:
+            pass
+
+        # 2순위: 작성자 영역의 sub-description 텍스트에서 상대 시간 파싱
+        sub_selectors = [
+            ".update-components-actor__sub-description",
+            ".feed-shared-actor__sub-description",
+            'a[href*="/feed/update/"] span[aria-hidden="true"]',
+        ]
+        for sel in sub_selectors:
+            try:
+                el = await element.query_selector(sel)
+                if el:
+                    text = (await el.inner_text()).strip()
+                    dt = _parse_relative_time(text)
+                    if dt:
+                        return dt
+            except Exception:
+                continue
+
+        return None
 
     async def _extract_post_urn(self, element, page) -> str:
         """관리 메뉴의 '게시물 삽입' 링크에서 실제 포스트 URN을 추출한다."""
@@ -425,3 +468,44 @@ class LinkedInCollector:
         except Exception:
             pass
         return 0
+
+
+# 한국어/영어 상대 시간 패턴 (긴 단위부터 매칭해 모호성 회피)
+_RELATIVE_TIME_PATTERNS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"(\d+)\s*년"), "years"),
+    (re.compile(r"(\d+)\s*개월"), "months"),
+    (re.compile(r"(\d+)\s*달"), "months"),
+    (re.compile(r"(\d+)\s*주"), "weeks"),
+    (re.compile(r"(\d+)\s*일"), "days"),
+    (re.compile(r"(\d+)\s*시간"), "hours"),
+    (re.compile(r"(\d+)\s*분"), "minutes"),
+    (re.compile(r"(\d+)\s*초"), "seconds"),
+    (re.compile(r"\b(\d+)\s*y(?:r|ear)?s?\b", re.I), "years"),
+    (re.compile(r"\b(\d+)\s*mo(?:nth)?s?\b", re.I), "months"),
+    (re.compile(r"\b(\d+)\s*w(?:eek)?s?\b", re.I), "weeks"),
+    (re.compile(r"\b(\d+)\s*d(?:ay)?s?\b", re.I), "days"),
+    (re.compile(r"\b(\d+)\s*h(?:our|r)?s?\b", re.I), "hours"),
+    (re.compile(r"\b(\d+)\s*m(?:in|inute)?s?\b", re.I), "minutes"),
+    (re.compile(r"\b(\d+)\s*s(?:ec|econd)?s?\b", re.I), "seconds"),
+]
+
+
+def _parse_relative_time(text: str) -> Optional[datetime]:
+    """'2일', '1주', '3시간', '5h' 등을 datetime(naive UTC)으로 변환."""
+    if not text:
+        return None
+    if "방금" in text or "just now" in text.lower():
+        return datetime.utcnow()
+
+    now = datetime.utcnow()
+    for pattern, unit in _RELATIVE_TIME_PATTERNS:
+        m = pattern.search(text)
+        if not m:
+            continue
+        n = int(m.group(1))
+        if unit == "years":
+            return now - timedelta(days=n * 365)
+        if unit == "months":
+            return now - timedelta(days=n * 30)
+        return now - timedelta(**{unit: n})
+    return None
