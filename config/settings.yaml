@@ -3,6 +3,7 @@ app:
   timezone: "Asia/Seoul"
 
 collection:
+  max_age_days: 2  # 게시일 N일 초과 게시물은 수집 단계에서 제외
   twitter:
     enabled: true
     interval_minutes: 10

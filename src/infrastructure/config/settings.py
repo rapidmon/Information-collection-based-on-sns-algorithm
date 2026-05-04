@@ -64,6 +64,8 @@ class CollectorConfig:
         self.pages_to_scrape: int = data.get("pages_to_scrape", 3)
         self.request_delay_min: float = data.get("request_delay_min", 1.5)
         self.request_delay_max: float = data.get("request_delay_max", 3.0)
+        # 수집 단계 게시일 컷오프 (collection.max_age_days에서 주입)
+        self.max_age_days: int = data.get("max_age_days", 2)
 
 
 class CategoryConfig:
@@ -115,7 +117,12 @@ class AppConfig:
         self.name: str = data.get("app", {}).get("name", "SNS Tech Briefing")
         self.timezone: str = data.get("app", {}).get("timezone", "Asia/Seoul")
 
-        collection = data.get("collection", {})
+        collection = dict(data.get("collection", {}))
+        # 전역 max_age_days를 각 collector dict에 주입 (개별 override 가능)
+        global_max_age = collection.pop("max_age_days", 2)
+        for val in collection.values():
+            if isinstance(val, dict):
+                val.setdefault("max_age_days", global_max_age)
         self.collectors: dict[str, CollectorConfig] = {
             key: CollectorConfig(val) for key, val in collection.items()
         }
