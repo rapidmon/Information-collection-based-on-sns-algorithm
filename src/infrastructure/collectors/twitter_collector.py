@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Optional
 
 from src.domain.entities import Post
@@ -228,6 +228,14 @@ class TwitterCollector:
                     published_at = datetime.strptime(created_at_str, "%a %b %d %H:%M:%S %z %Y")
                 except ValueError:
                     pass
+
+            # 게시일 컷오프 — max_age_days 초과면 스킵
+            if published_at:
+                cutoff = datetime.now(published_at.tzinfo) - timedelta(
+                    days=self._config.max_age_days
+                )
+                if published_at < cutoff:
+                    return None
 
             return Post(
                 source="twitter",

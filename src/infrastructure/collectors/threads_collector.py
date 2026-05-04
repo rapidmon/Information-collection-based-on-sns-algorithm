@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Optional
 
 from src.domain.entities import Post
@@ -207,6 +207,12 @@ class ThreadsCollector:
 
             taken_at = post_data.get("taken_at")
             published_at = datetime.utcfromtimestamp(taken_at) if taken_at else None
+
+            # 게시일 컷오프 — max_age_days 초과면 스킵 (published_at은 naive UTC)
+            if published_at:
+                cutoff = datetime.utcnow() - timedelta(days=self._config.max_age_days)
+                if published_at < cutoff:
+                    return None
 
             url = f"https://www.threads.net/@{username}/post/{code}" if code else ""
 
