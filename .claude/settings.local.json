@@ -49,7 +49,23 @@
       "Bash(find /c/Users/ehhwl/Desktop/private_project/sns_algorithm_data_collection -name *.log)",
       "Bash(ls /c/Users/ehhwl/Desktop/private_project/sns_algorithm_data_collection/*.json)",
       "Bash(grep -r min_importance_for_briefing /c/Users/ehhwl/Desktop/private_project/sns_algorithm_data_collection/ --include=*.yaml --include=*.yml --include=*.json --include=*.env)",
-      "WebFetch(domain:www.threads.com)"
+      "WebFetch(domain:www.threads.com)",
+      "Bash(git -C /c/Users/ehhwl/Desktop/private_project/sns_algorithm_data_collection log --oneline --all -- \"*linkedin*\")",
+      "Bash(git:*)",
+      "Bash(netstat -ano)",
+      "Bash(findstr :9222)",
+      "Bash(grep -E \"\\\\.\\(py|txt\\)$\")",
+      "Bash(grep -E \"\\\\.py$\")",
+      "Bash(grep -v \"repository.py$\")",
+      "Bash(ls -la *.log)",
+      "Bash(ls -la log*)",
+      "Bash(sqlite3 *)",
+      "Bash(pip list *)",
+      "Bash(ls .env*)",
+      "Bash(grep -l \"OPENAI\" .env*)",
+      "WebFetch(domain:developers.openai.com)",
+      "Bash(wmic process *)",
+      "Bash(tasklist /FI \"IMAGENAME eq chrome.exe\" /V)"
     ],
     "disallow": [
       "Bash(git push)"
