@@ -63,6 +63,14 @@ class PostRepository(Protocol):
         """브리핑에 포함되지 않은 관련 게시물 조회."""
         ...
 
+    def get_likeable(self, source: str, min_importance: float, limit: int) -> list[Post]:
+        """자동 좋아요 대상: 관련 O + 중요도 임계값 이상 + 미좋아요 게시물."""
+        ...
+
+    def mark_liked(self, post_ids: list[str], liked_at: datetime) -> int:
+        """게시물들의 liked_at 설정 (자동 좋아요 완료 마킹)."""
+        ...
+
     async def mark_briefed(self, post_ids: list[str], briefed_at: datetime) -> int:
         """게시물들의 briefed_at 설정 (브리핑 완료 마킹)."""
         ...

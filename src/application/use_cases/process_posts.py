@@ -21,19 +21,55 @@ class ProcessPostsUseCase:
         self._post_repo = post_repo
         self._ai = ai_processor
 
-    async def execute(self, limit: int = 200, min_posts_threshold: int = 0) -> dict[str, int]:
-        """미처리 게시물을 AI로 처리. 처리 통계를 반환."""
-        posts = self._post_repo.get_unprocessed(limit=limit)
-        if not posts:
-            logger.info("처리할 새 게시물 없음")
-            return {"total": 0, "relevant": 0, "filtered_out": 0, "deleted": 0}
+    async def execute(
+        self,
+        limit: int = 200,
+        chunk_size: int = 50,
+        min_posts_threshold: int = 0,
+    ) -> dict[str, int]:
+        """미처리 게시물을 청크 단위로 가져와 AI 처리. 처리 통계를 반환."""
+        totals = {"total": 0, "relevant": 0, "filtered_out": 0, "deleted": 0}
+        processed_total = 0
+        first_fetch = True
 
-        if len(posts) < min_posts_threshold:
-            logger.info(
-                f"처리 건수 부족 ({len(posts)}건 < {min_posts_threshold}건), 스킵"
+        while processed_total < limit:
+            remaining = limit - processed_total
+            # 첫 fetch는 threshold 검사를 위해 max(chunk_size, threshold)만큼 가져옴
+            fetch_size = (
+                max(chunk_size, min_posts_threshold) if first_fetch
+                else min(chunk_size, remaining)
             )
-            return {"total": 0, "relevant": 0, "filtered_out": 0, "deleted": 0}
+            chunk = self._post_repo.get_unprocessed(limit=fetch_size)
 
+            if not chunk:
+                if first_fetch:
+                    logger.info("처리할 새 게시물 없음")
+                break
+
+            if first_fetch and len(chunk) < min_posts_threshold:
+                logger.info(
+                    f"처리 건수 부족 ({len(chunk)}건 < {min_posts_threshold}건), 스킵"
+                )
+                break
+
+            # 첫 fetch에서 chunk_size를 초과해 가져왔어도 처리는 chunk_size씩
+            chunk = chunk[: min(chunk_size, remaining)]
+            first_fetch = False
+
+            chunk_stats = await self._process_chunk(chunk)
+            totals["total"] += chunk_stats["total"]
+            totals["relevant"] += chunk_stats["relevant"]
+            totals["filtered_out"] += chunk_stats["filtered_out"]
+            processed_total += len(chunk)
+
+        logger.info(
+            f"AI 처리 완료: 전체 {totals['total']}건, "
+            f"관련 {totals['relevant']}건, 비관련 {totals['filtered_out']}건"
+        )
+        return totals
+
+    async def _process_chunk(self, posts: list) -> dict[str, int]:
+        """단일 청크에 대해 필터→검증→분류→업데이트 파이프라인을 실행."""
         logger.info(f"AI 처리 시작: {len(posts)}건")
 
         # 1. 관련성 필터 + 요약
@@ -99,20 +135,14 @@ class ProcessPostsUseCase:
                     post.importance_score = cr.importance_score
                     post.keywords = cr.keywords or []
 
-        # 4. 관련/비관련 게시물 모두 DB 업데이트 (재처리 방지)
-        updated = 0
+        # 4. 청크 단위로 즉시 DB 업데이트 — 메모리 해제 + 크래시 시 진행분 보존
         all_processed = relevant_posts + irrelevant_posts
         if all_processed:
-            updated = self._post_repo.update_many(all_processed)
+            self._post_repo.update_many(all_processed)
 
-        stats = {
+        return {
             "total": len(posts),
             "relevant": len(relevant_posts),
             "filtered_out": len(irrelevant_posts),
             "deleted": 0,
         }
-        logger.info(
-            f"AI 처리 완료: 전체 {stats['total']}건, "
-            f"관련 {stats['relevant']}건, 비관련 {stats['filtered_out']}건"
-        )
-        return stats

@@ -74,6 +74,12 @@ def init_sqlite_db() -> None:
         );
     """)
 
+    # liked_at 컬럼 마이그레이션 (기존 DB 호환 — 자동 좋아요 완료 시각)
+    cursor.execute("PRAGMA table_info(posts)")
+    existing_cols = {row[1] for row in cursor.fetchall()}
+    if "liked_at" not in existing_cols:
+        cursor.execute("ALTER TABLE posts ADD COLUMN liked_at TIMESTAMP")
+
     # 인덱스 생성 (성능 최적화)
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_collected_at ON posts(collected_at);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_source ON posts(source);")
@@ -117,6 +123,30 @@ def _post_to_dict(post: Post) -> dict[str, Any]:
     }
 
 
+def _parse_dt(val):
+    """SQLite의 timestamp 값(주로 문자열)을 datetime으로 변환.
+
+    sqlite3 연결에 detect_types가 없어 TIMESTAMP 컬럼이 문자열로 반환되므로,
+    엔티티의 datetime 타입 계약을 지키도록 여기서 파싱한다.
+    """
+    if val is None or isinstance(val, datetime):
+        return val
+    if not isinstance(val, str) or not val.strip():
+        return None
+    s = val.strip()
+    try:
+        return datetime.fromisoformat(s)
+    except ValueError:
+        pass
+    s2 = s.replace("T", " ").replace("Z", "")
+    for fmt in ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(s2, fmt)
+        except ValueError:
+            continue
+    return None
+
+
 def _post_from_row(row: sqlite3.Row) -> Post:
     """SQLite 행을 Post 엔티티로 변환."""
     import json
@@ -135,15 +165,15 @@ def _post_from_row(row: sqlite3.Row) -> Post:
         engagement_reposts=row["engagement_reposts"],
         engagement_comments=row["engagement_comments"],
         engagement_views=row["engagement_views"],
-        published_at=row["published_at"],
-        collected_at=row["collected_at"],
+        published_at=_parse_dt(row["published_at"]),
+        collected_at=_parse_dt(row["collected_at"]),
         summary=row["summary"],
         importance_score=row["importance_score"],
         language=row["language"],
         is_relevant=bool(row["is_relevant"]) if row["is_relevant"] is not None else None,
         category_names=json.loads(row["category_names"] or "[]"),
         keywords=json.loads(row["keywords"] or "[]"),
-        briefed_at=row["briefed_at"],
+        briefed_at=_parse_dt(row["briefed_at"]),
         content_hash=row["content_hash"],
         dedup_cluster_id=row["dedup_cluster_id"],
     )
@@ -287,6 +317,43 @@ class PostRepositorySQLite:
 
         conn.commit()
         return saved
+
+    def get_likeable(self, source: str, min_importance: float, limit: int) -> list[Post]:
+        """자동 좋아요 대상 조회.
+
+        관련 O(is_relevant=1) + 중요도 임계값 이상 + 아직 좋아요 안 함(liked_at IS NULL)
+        + URL 보유. 중요도 높은 순으로 반환.
+        """
+        conn = _get_db()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT * FROM posts
+            WHERE source = ?
+              AND is_relevant = 1
+              AND importance_score >= ?
+              AND liked_at IS NULL
+              AND url IS NOT NULL AND url != ''
+            ORDER BY importance_score DESC, collected_at DESC
+            LIMIT ?
+            """,
+            (source, min_importance, limit),
+        )
+        return [_post_from_row(row) for row in cursor.fetchall()]
+
+    def mark_liked(self, post_ids: list[str], liked_at: datetime) -> int:
+        """게시물들의 liked_at 설정 (자동 좋아요 완료 마킹)."""
+        if not post_ids:
+            return 0
+        conn = _get_db()
+        cursor = conn.cursor()
+        placeholders = ",".join("?" * len(post_ids))
+        cursor.execute(
+            f"UPDATE posts SET liked_at = ? WHERE id IN ({placeholders})",
+            [liked_at.isoformat(), *post_ids],
+        )
+        conn.commit()
+        return cursor.rowcount
 
     def get_unprocessed(self, limit: int = 100) -> list[Post]:
         """AI 처리 안 된 게시물 조회 (summary가 None)."""

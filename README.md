@@ -104,16 +104,18 @@ email:
 **중요: 반드시 아래 명령어 그대로 실행하세요.** `--user-data-dir` 옵션으로 기본 Chrome 프로필과 분리된 별도 세션을 사용합니다.
 
 ```bash
-"C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222 --user-data-dir="C:\chrome_temp"
+"C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222 --user-data-dir="C:\chrome_temp" --disable-extensions --disable-features=Translate,MediaRouter --disable-background-networking --js-flags="--max-old-space-size=512"
 ```
+
+> 추가 플래그는 메모리 절약용입니다(확장 비활성, 백그라운드 네트워킹 차단, V8 힙 상한 512MB).
 
 > Mac/Linux의 경우:
 > ```bash
 > # Mac
-> /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=9222 --user-data-dir="/tmp/chrome_temp"
+> /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=9222 --user-data-dir="/tmp/chrome_temp" --disable-extensions --disable-features=Translate,MediaRouter --disable-background-networking --js-flags="--max-old-space-size=512"
 >
 > # Linux
-> google-chrome --remote-debugging-port=9222 --user-data-dir="/tmp/chrome_temp"
+> google-chrome --remote-debugging-port=9222 --user-data-dir="/tmp/chrome_temp" --disable-extensions --disable-features=Translate,MediaRouter --disable-background-networking --js-flags="--max-old-space-size=512"
 > ```
 
 이 Chrome 창에서 수집하고 싶은 SNS에 로그인하세요:

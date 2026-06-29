@@ -64,6 +64,11 @@ async def _reload_and_reconnect(pw: Playwright, cdp_url: str, source_name: str):
                 "--remote-debugging-port=9222",
                 f"--user-data-dir={user_data_dir}",
                 "--restore-last-session",
+                # 메모리 절약 플래그
+                "--disable-extensions",
+                "--disable-features=Translate,MediaRouter",
+                "--disable-background-networking",
+                "--js-flags=--max-old-space-size=512",
             ],
         )
     except Exception as e:

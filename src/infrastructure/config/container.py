@@ -9,11 +9,14 @@ from __future__ import annotations
 from src.domain.entities import Category
 from src.application.use_cases.collect_posts import CollectPostsUseCase
 from src.application.use_cases.generate_briefing import GenerateBriefingUseCase
+from src.application.use_cases.like_posts import LikePostsUseCase
 from src.application.use_cases.process_posts import ProcessPostsUseCase
 from src.application.use_cases.send_briefing import SendBriefingUseCase
+from src.infrastructure.ai.claude_code_processor import ClaudeCodeProcessor
 from src.infrastructure.ai.openai_processor import OpenAIProcessor
 from src.infrastructure.collectors.dcinside_collector import DCInsideCollector
 from src.infrastructure.collectors.linkedin_collector import LinkedInCollector
+from src.infrastructure.collectors.post_liker import CdpPostLiker
 from src.infrastructure.collectors.threads_collector import ThreadsCollector
 from src.infrastructure.collectors.twitter_collector import TwitterCollector
 from src.infrastructure.config.settings import AppConfig, Settings, SnsCredentials
@@ -46,14 +49,27 @@ class Container:
         self.run_repo = SQLiteCollectionRunRepository()
 
         # ─── Infrastructure Services ───
-        self.ai_processor = OpenAIProcessor(
-            api_key=settings.openai_api_key,
-            config=app_config.processing,
-        )
+        # AI 백엔드 선택: claude_code(구독, API 키 불필요) 또는 openai(API 키)
+        if app_config.processing.ai_backend == "claude_code":
+            self.ai_processor = ClaudeCodeProcessor(
+                config=app_config.processing,
+                model_filter=app_config.processing.claude_model_filter,
+                model_process=app_config.processing.claude_model_process,
+                timeout=app_config.processing.claude_timeout,
+                oauth_token=settings.claude_code_oauth_token or None,
+            )
+        else:
+            self.ai_processor = OpenAIProcessor(
+                api_key=settings.openai_api_key,
+                config=app_config.processing,
+            )
 
         self.briefing_generator = DefaultBriefingGenerator(app_config.briefing)
 
         self.notifier = EmailNotifier(settings, app_config.email)
+
+        # 자동 좋아요 (AI 처리 후 관련+중요 게시물에만)
+        self.post_liker = CdpPostLiker(app_config.like)
 
         # ─── Collectors ───
         self.collectors: dict[str, object] = {}
@@ -107,6 +123,13 @@ class Container:
         return ProcessPostsUseCase(
             post_repo=self.post_repo,
             ai_processor=self.ai_processor,
+        )
+
+    def like_posts_use_case(self) -> LikePostsUseCase:
+        return LikePostsUseCase(
+            post_repo=self.post_repo,
+            liker=self.post_liker,
+            config=self.config.like,
         )
 
     def generate_briefing_use_case(self) -> GenerateBriefingUseCase:

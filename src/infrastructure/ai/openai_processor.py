@@ -237,14 +237,33 @@ class OpenAIProcessor:
             ]
 
         # 2단계: 웹 검색으로 각 주장 검증
+        # 검색이 '실패'(rate limit 등)한 주장은 검증 대상에서 제외한다.
+        # (검색 인프라 장애로 정상 뉴스를 스캠으로 오판해 떨어뜨리는 것을 방지)
         verification_data = []
+        search_failed = 0
         for claim_item in claims_to_verify:
             search_results = self._web_search(claim_item["claim"])
+            if search_results is None:
+                search_failed += 1
+                continue
             verification_data.append({
                 "post_id": claim_item["post_id"],
                 "claim": claim_item["claim"],
                 "search_results": search_results,
             })
+
+        if search_failed:
+            logger.warning(
+                f"웹 검색 실패 {search_failed}건 — 해당 게시물은 검증 스킵(통과 처리)"
+            )
+
+        # 검증 가능한 주장이 하나도 없으면(전부 검색 실패) 전체 통과
+        if not verification_data:
+            logger.info("검색 가능한 주장 없음(검색 실패) — 전체 통과")
+            return [
+                VerificationResult(post_id=p.id, credibility="verified")
+                for p in posts
+            ]
 
         # 3단계: GPT로 원문 vs 검색 결과 비교 판정
         verification_json = json.dumps(verification_data, ensure_ascii=False, indent=2)
@@ -283,8 +302,13 @@ class OpenAIProcessor:
         )
         return results
 
-    def _web_search(self, query: str, max_results: int = 5) -> list[dict]:
-        """DuckDuckGo로 웹 검색하여 결과 반환."""
+    def _web_search(self, query: str, max_results: int = 5) -> list[dict] | None:
+        """DuckDuckGo로 웹 검색.
+
+        - 성공: 결과 리스트 반환(결과가 없으면 빈 리스트 []).
+        - 실패(rate limit/네트워크 등): None 반환 → 호출부가 '검증 불가'로 처리해
+          정상 게시물을 스캠으로 오판하지 않도록 한다.
+        """
         try:
             with DDGS() as ddgs:
                 results = list(ddgs.text(query, max_results=max_results))
@@ -294,7 +318,7 @@ class OpenAIProcessor:
             ]
         except Exception as e:
             logger.warning(f"웹 검색 실패 '{query[:50]}': {e}")
-            return []
+            return None
 
     async def deduplicate_and_merge(self, posts: list[Post]) -> list[MergedTopic]:
         """중복 제거 + 토픽 통합 (GPT-4o 사용, 청킹)."""

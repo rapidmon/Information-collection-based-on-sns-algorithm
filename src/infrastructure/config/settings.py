@@ -26,6 +26,9 @@ class SnsCredentials:
 # ──────────────────────────────────────────
 class Settings(BaseSettings):
     openai_api_key: str = ""
+    # claude_code 백엔드를 다른 머신/서비스 컨텍스트에서 쓸 때만 필요(선택).
+    # 본인 머신에서 claude 로그인이 되어 있으면 비워둬도 됨.
+    claude_code_oauth_token: str = ""
     smtp_host: str = "smtp.gmail.com"
     smtp_port: int = 587
     smtp_user: str = ""
@@ -78,8 +81,14 @@ class CategoryConfig:
 
 class ProcessingConfig:
     def __init__(self, data: dict[str, Any]):
+        # AI 백엔드 선택: "openai"(API 키) 또는 "claude_code"(claude CLI, 구독)
+        self.ai_backend: str = data.get("ai_backend", "openai")
         self.model_filter: str = data.get("model_filter", "gpt-4o-mini")
         self.model_process: str = data.get("model_process", "gpt-4o")
+        # claude_code 백엔드용 모델 (Claude 모델 ID)
+        self.claude_model_filter: str = data.get("claude_model_filter", "claude-haiku-4-5")
+        self.claude_model_process: str = data.get("claude_model_process", "claude-sonnet-4-6")
+        self.claude_timeout: int = data.get("claude_timeout", 300)
         self.batch_size_filter: int = data.get("batch_size_filter", 20)
         self.batch_size_summarize: int = data.get("batch_size_summarize", 15)
         self.batch_size_categorize: int = data.get("batch_size_categorize", 20)
@@ -88,6 +97,22 @@ class ProcessingConfig:
         self.dedup_chunk_size: int = data.get("dedup_chunk_size", 80)
         self.processing_interval_minutes: int = data.get("processing_interval_minutes", 30)
         self.min_posts_to_process: int = data.get("min_posts_to_process", 5)
+
+
+class LikeConfig:
+    """자동 좋아요 설정. AI 처리 후 관련+중요 게시물에만 좋아요를 누른다."""
+
+    def __init__(self, data: dict[str, Any]):
+        self.enabled: bool = data.get("enabled", False)
+        self.dry_run: bool = data.get("dry_run", True)
+        self.max_per_run: int = data.get("max_per_run", 10)
+        # 이 중요도 이상인 관련 게시물만 좋아요
+        self.min_importance: float = data.get("min_importance", 0.7)
+        self.delay_min: float = data.get("delay_min", 2.0)
+        self.delay_max: float = data.get("delay_max", 5.0)
+        self.platforms: list[str] = data.get(
+            "platforms", ["twitter", "threads", "linkedin"]
+        )
 
 
 class BriefingConfig:
@@ -132,6 +157,7 @@ class AppConfig:
         ]
 
         self.processing = ProcessingConfig(data.get("processing", {}))
+        self.like = LikeConfig(data.get("like", {}))
         self.briefing = BriefingConfig(data.get("briefing", {}))
         self.email = EmailConfig(data.get("email", {}))
         self.web = WebConfig(data.get("web", {}))

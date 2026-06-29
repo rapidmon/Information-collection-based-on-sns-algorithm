@@ -63,6 +63,7 @@ class Orchestrator:
             id="process_posts",
             name="AI Process Posts",
             max_instances=1,
+            misfire_grace_time=300,
             next_run_time=now + timedelta(minutes=5),
         )
         logger.info(f"AI 처리 작업 등록: 매 {processing_interval}분")
@@ -132,6 +133,15 @@ class Orchestrator:
         except Exception as e:
             logger.error(f"[scheduler] AI 처리 오류: {e}")
 
+        # AI 처리 후 자동 좋아요 (관련+중요 게시물에만)
+        try:
+            like_uc = self._c.like_posts_use_case()
+            like_stats = await like_uc.execute()
+            if like_stats:
+                logger.info(f"[scheduler] 자동 좋아요: {like_stats}")
+        except Exception as e:
+            logger.error(f"[scheduler] 자동 좋아요 오류: {e}")
+
     async def _run_daily_briefing(self) -> None:
         logger.info("[scheduler] 일일 브리핑 생성 시작")
         try:
@@ -153,7 +163,8 @@ class Orchestrator:
             logger.error(f"[scheduler] 일일 브리핑 오류: {e}")
 
     async def _health_check(self) -> None:
-        """각 소스의 연속 실패 횟수를 확인하고 임계치 초과 시 알림."""
+        """각 소스의 연속 실패 횟수를 확인하고 임계치 초과 시 알림. RSS도 함께 로깅."""
+        self._log_memory_usage()
         for source in self._c.collectors:
             try:
                 failures = await self._c.run_repo.count_consecutive_failures(source)
@@ -164,6 +175,31 @@ class Orchestrator:
                     )
             except Exception:
                 pass
+
+    @staticmethod
+    def _log_memory_usage() -> None:
+        """Python 프로세스와 모든 chrome.exe 프로세스의 RSS를 로깅."""
+        try:
+            import psutil
+
+            py_rss = psutil.Process().memory_info().rss
+            chrome_rss = 0
+            chrome_count = 0
+            for p in psutil.process_iter(["name", "memory_info"]):
+                try:
+                    if (p.info.get("name") or "").lower() == "chrome.exe":
+                        mi = p.info.get("memory_info")
+                        if mi:
+                            chrome_rss += mi.rss
+                            chrome_count += 1
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+            logger.info(
+                f"[health] RSS python={py_rss / 1024 / 1024:.0f}MB, "
+                f"chrome={chrome_rss / 1024 / 1024:.0f}MB ({chrome_count}개 프로세스)"
+            )
+        except Exception as e:
+            logger.warning(f"[health] 메모리 측정 실패: {e}")
 
     async def _cleanup_old_posts(self) -> None:
         """1개월 이상 된 포스트 자동 삭제 (로컬 SQLite 정리)."""

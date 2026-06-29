@@ -65,7 +65,25 @@
       "Bash(grep -l \"OPENAI\" .env*)",
       "WebFetch(domain:developers.openai.com)",
       "Bash(wmic process *)",
-      "Bash(tasklist /FI \"IMAGENAME eq chrome.exe\" /V)"
+      "Bash(tasklist /FI \"IMAGENAME eq chrome.exe\" /V)",
+      "Bash(cloudflared --version)",
+      "PowerShell(winget install *)",
+      "PowerShell(cloudflared *)",
+      "PowerShell(Get-Command *)",
+      "PowerShell(py *)",
+      "Bash(.venv/Scripts/python.exe -m pip install psutil==6.1.0)",
+      "Bash(.venv/Scripts/python.exe -m py_compile src/application/use_cases/scheduler.py src/application/use_cases/process_posts.py src/infrastructure/collectors/cdp.py)",
+      "PowerShell(Get-ChildItem -Directory | Where-Object { $_.Name -match 'venv|env|\\\\.venv' } | Select-Object Name; if \\(Test-Path \".venv\\\\Scripts\\\\python.exe\"\\) { \".venv found\" }; if \\(Test-Path \"venv\\\\Scripts\\\\python.exe\"\\) { \"venv found\" }; python -c \"import sys; print\\(sys.executable\\)\")",
+      "PowerShell(Remove-Item *)",
+      "PowerShell($c = \\(Get-Command claude -ErrorAction SilentlyContinue\\); if \\($c\\) { \"claude path: \" + $c.Source; \"type: \" + $c.CommandType } else { \"claude NOT on PATH\" })",
+      "PowerShell($env:PYTHONIOENCODING=\"utf-8\"; .\\\\.venv\\\\Scripts\\\\python.exe main.py 2>&1 | Select-Object -First 25)",
+      "PowerShell(try { $r = Invoke-RestMethod -Uri \"http://127.0.0.1:9222/json/version\" -TimeoutSec 5; \"OK - CDP 응답함\"; \"Browser: \" + $r.Browser; \"webSocket: \" + \\($r.webSocketDebuggerUrl -ne $null\\) } catch { \"FAIL - 9222 포트 응답 없음: \" + $_.Exception.Message })",
+      "PowerShell($env:PYTHONIOENCODING=\"utf-8\"; .\\\\.venv\\\\Scripts\\\\python.exe main.py 2>&1 | Select-Object -First 3)",
+      "PowerShell($env:PYTHONIOENCODING=\"utf-8\"; .\\\\.venv\\\\Scripts\\\\python.exe -c \"import main; from src.infrastructure.config.container import Container; print\\('import chain OK'\\)\")",
+      "PowerShell($env:PYTHONIOENCODING=\"utf-8\"; .\\\\.venv\\\\Scripts\\\\python.exe -c \"import src.application.use_cases.scheduler; print\\('scheduler import OK'\\)\")",
+      "Bash(.venv/Scripts/python.exe -c ' *)",
+      "Bash(tasklist)",
+      "PowerShell($env:PYTHONIOENCODING=\"utf-8\"; .\\\\.venv\\\\Scripts\\\\python.exe _tmp_repro500.py 2>&1 | Select-Object -First 30)"
     ],
     "disallow": [
       "Bash(git push)"

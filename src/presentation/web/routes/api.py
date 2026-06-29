@@ -95,11 +95,17 @@ async def trigger_collection(request: Request, source: str):
 
 @router.post("/process/trigger")
 async def trigger_processing(request: Request):
-    """수동 AI 처리 트리거."""
+    """수동 AI 처리 트리거 (처리 후 자동 좋아요 포함)."""
     c = _get_container(request)
     try:
         uc = c.process_posts_use_case()
         stats = await uc.execute()
+        try:
+            like_stats = await c.like_posts_use_case().execute()
+            if like_stats:
+                stats = {**stats, "liked": like_stats}
+        except Exception as e:
+            stats = {**stats, "like_error": str(e)}
         return stats
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})

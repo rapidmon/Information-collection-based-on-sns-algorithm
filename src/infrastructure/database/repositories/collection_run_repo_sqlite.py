@@ -6,7 +6,7 @@ import sqlite3
 from datetime import datetime
 
 from src.domain.entities import CollectionRun
-from src.infrastructure.database.repositories.post_repo_sqlite import _get_db, DB_PATH
+from src.infrastructure.database.repositories.post_repo_sqlite import _get_db, _parse_dt, DB_PATH
 
 
 def _init_table() -> None:
@@ -29,8 +29,8 @@ def _run_from_row(row: sqlite3.Row) -> CollectionRun:
     return CollectionRun(
         id=row["id"],
         source=row["source"],
-        started_at=row["started_at"],
-        completed_at=row["completed_at"],
+        started_at=_parse_dt(row["started_at"]),
+        completed_at=_parse_dt(row["completed_at"]),
         status=row["status"],
         posts_collected=row["posts_collected"],
         error_message=row["error_message"],

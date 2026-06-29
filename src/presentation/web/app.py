@@ -32,7 +32,8 @@ def create_app(container: Container) -> FastAPI:
     app.state.container = container
     app.state.templates = Jinja2Templates(directory=str(_TEMPLATE_DIR))
 
-    # 정적 파일
+    # 정적 파일 (디렉터리가 없으면 생성 — StaticFiles는 없는 디렉터리에 마운트 시 크래시)
+    _STATIC_DIR.mkdir(parents=True, exist_ok=True)
     app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
     # 라우터 등록

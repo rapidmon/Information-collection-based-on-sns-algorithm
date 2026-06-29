@@ -63,16 +63,29 @@ categories:
     keywords: ["코딩", "프로그래밍", "개발자", "GitHub", "오픈소스", "Python", "JavaScript", "React", "프레임워크", "API", "DevOps", "CI/CD"]
 
 processing:
-  model_filter: "gpt-4o-mini"
-  model_process: "gpt-5-mini"
+  ai_backend: "claude_code"           # "claude_code"(구독, API 키 불필요) 또는 "openai"(API 키)
+  claude_model_filter: "claude-haiku-4-5"    # 필터/분류/검증용 (빠르고 저렴)
+  claude_model_process: "claude-sonnet-4-6"  # 중복제거/통합용 (정교함). 절약하려면 haiku로
+  claude_timeout: 300
+  model_filter: "gpt-4o-mini"         # ai_backend=openai 일 때만 사용
+  model_process: "gpt-5-mini"         # ai_backend=openai 일 때만 사용
   batch_size_filter: 20
   batch_size_summarize: 15
   batch_size_categorize: 20
   use_batch_api: true
-  min_importance_for_briefing: 0.8
+  min_importance_for_briefing: 0.85
   dedup_chunk_size: 80
   processing_interval_minutes: 30
   min_posts_to_process: 10
+
+like:
+  enabled: true            # 자동 좋아요 사용 여부
+  dry_run: true            # true면 실제로 누르지 않고 버튼 확인 후 "좋아요 대상"만 로그
+  max_per_run: 10          # 1회(플랫폼당) 최대 좋아요 수
+  min_importance: 0.7      # AI 중요도 이 값 이상인 관련 게시물만 좋아요
+  delay_min: 2.0           # 좋아요 사이 최소 대기(초)
+  delay_max: 5.0           # 좋아요 사이 최대 대기(초)
+  platforms: ["twitter", "threads", "linkedin"]
 
 briefing:
   daily_time: "09:00"
