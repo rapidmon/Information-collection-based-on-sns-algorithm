@@ -121,16 +121,15 @@ async def trigger_briefing(request: Request):
         gen_uc = c.generate_briefing_use_case()
         briefing = await gen_uc.execute(now - timedelta(hours=24), now)
 
-        email_sent = False
+        send_results = {}
         if briefing.total_items > 0:
-            send_uc = c.send_briefing_use_case()
-            email_sent = await send_uc.execute(briefing)
+            send_results = await c.send_curated_briefing(briefing)
 
         return {
             "id": briefing.id,
             "title": briefing.title,
             "total_items": briefing.total_items,
-            "email_sent": email_sent,
+            "send": send_results,
         }
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})

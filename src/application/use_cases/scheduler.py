@@ -46,7 +46,7 @@ class Orchestrator:
                 id=f"collect_{source}",
                 name=f"Collect {source}",
                 max_instances=1,
-                misfire_grace_time=300,
+                misfire_grace_time=1800,  # AI 처리로 루프가 막혀도 스킵 안 되게 넉넉히
                 next_run_time=start_time,
             )
             logger.info(
@@ -153,8 +153,8 @@ class Orchestrator:
             briefing = await gen_uc.execute(period_start, period_end)
 
             if briefing.total_items > 0:
-                send_uc = self._c.send_briefing_use_case()
-                await send_uc.execute(briefing)
+                send_results = await self._c.send_curated_briefing(briefing)
+                logger.info(f"[scheduler] 브리핑 발송: {send_results}")
 
             logger.info(
                 f"[scheduler] 일일 브리핑 완료: {briefing.title} ({briefing.total_items}건)"

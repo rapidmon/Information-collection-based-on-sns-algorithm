@@ -31,6 +31,9 @@ collection:
     pages_to_scrape: 3
     request_delay_min: 1.5
     request_delay_max: 3.0
+  36kr:
+    enabled: true
+    interval_minutes: 30   # 중국 산업/AI/개발 뉴스플래시 (HTTP, 로그인 불필요)
 
 categories:
   - name: "AI"
@@ -42,9 +45,9 @@ categories:
     color: "#E74C3C"
     keywords: ["반도체", "semiconductor", "칩", "chip", "TSMC", "삼성파운드리", "HBM", "GPU", "NVIDIA", "AMD", "Intel", "파운드리"]
   - name: "Cloud"
-    name_ko: "클라우드"
+    name_ko: "클라우드·인프라"
     color: "#2ECC71"
-    keywords: ["클라우드", "cloud", "AWS", "Azure", "GCP", "데이터센터", "SaaS", "IaaS"]
+    keywords: ["클라우드", "cloud", "AWS", "Azure", "GCP", "SaaS", "IaaS", "데이터센터", "data center", "인프라", "추론 서빙", "모델 서빙", "전력", "전력망", "전력기기", "변압기", "냉각", "PUE", "발전"]
   - name: "Startup"
     name_ko: "스타트업"
     color: "#F39C12"
@@ -66,7 +69,7 @@ processing:
   ai_backend: "claude_code"           # "claude_code"(구독, API 키 불필요) 또는 "openai"(API 키)
   claude_model_filter: "claude-haiku-4-5"    # 필터/분류/검증용 (빠르고 저렴)
   claude_model_process: "claude-sonnet-4-6"  # 중복제거/통합용 (정교함). 절약하려면 haiku로
-  claude_timeout: 300
+  claude_timeout: 600
   model_filter: "gpt-4o-mini"         # ai_backend=openai 일 때만 사용
   model_process: "gpt-5-mini"         # ai_backend=openai 일 때만 사용
   batch_size_filter: 20
@@ -74,7 +77,7 @@ processing:
   batch_size_categorize: 20
   use_batch_api: true
   min_importance_for_briefing: 0.85
-  dedup_chunk_size: 80
+  dedup_chunk_size: 30
   processing_interval_minutes: 30
   min_posts_to_process: 10
 
@@ -91,9 +94,23 @@ briefing:
   daily_time: "09:00"
   max_items: 50
   include_stats: true
+  min_importance: 0.8       # 병합 후 재산정 점수 하한 (저중요도 항목 제거)
+  max_per_category: 8       # 카테고리별 최대 항목 수 (한 카테고리 과다 방지)
 
 email:
   enabled: true
+  curation: true                # 독자층별 큐레이션(전체 리드+카테고리 B-2+킥) 생성
+  logo_path: "Logo.png"         # 메일 헤더 로고 (cid 임베드)
+  subject_prefix: "Morning Commit"
+  # 독자층별 발송: 페르소나(=큐레이션 대상) → 수신주소
+  audiences:
+    "국내 개발자":
+      - "ehhwll@hanmail.net"
+      - "sbemls@donga.com"
+      - "jey_sieun@donga.com"
+    "국내 CS 취준생 및 주니어 개발자":
+      - "ndbsrjsdn@naver.com"
+  # 폴백 (audiences 비울 때만 사용 — 큐레이션 없이 중립 발송)
   to_addresses:
     - "ehhwll@hanmail.net"
     - "ndbsrjsdn@naver.com"

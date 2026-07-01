@@ -15,6 +15,7 @@ from src.application.use_cases.send_briefing import SendBriefingUseCase
 from src.infrastructure.ai.claude_code_processor import ClaudeCodeProcessor
 from src.infrastructure.ai.openai_processor import OpenAIProcessor
 from src.infrastructure.collectors.dcinside_collector import DCInsideCollector
+from src.infrastructure.collectors.kr36_collector import Kr36Collector
 from src.infrastructure.collectors.linkedin_collector import LinkedInCollector
 from src.infrastructure.collectors.post_liker import CdpPostLiker
 from src.infrastructure.collectors.threads_collector import ThreadsCollector
@@ -81,6 +82,9 @@ class Container:
         if "dcinside" in collector_configs and collector_configs["dcinside"].enabled:
             self.collectors["dcinside"] = DCInsideCollector(collector_configs["dcinside"])
 
+        if "36kr" in collector_configs and collector_configs["36kr"].enabled:
+            self.collectors["36kr"] = Kr36Collector(collector_configs["36kr"])
+
         # SNS 수집기 — 모두 CDP 기반 (사용자의 Chrome에 연결)
         if "twitter" in collector_configs and collector_configs["twitter"].enabled:
             self.collectors["twitter"] = TwitterCollector(
@@ -146,3 +150,40 @@ class Container:
             briefing_repo=self.briefing_repo,
             notifier=self.notifier,
         )
+
+    async def send_curated_briefing(self, briefing) -> dict:
+        """독자층별 큐레이션 생성 → Morning Commit HTML 렌더 → 그룹별 발송."""
+        from src.domain.services.ai_processor import Curation, MergedTopic
+        from src.infrastructure.delivery.email_renderer import render_email_html
+
+        ecfg = self.config.email
+        topics = []
+        for it in briefing.items:
+            bullets = [l.strip().lstrip("- ").strip() for l in (it.body or "").split("\n") if l.strip()]
+            topics.append(MergedTopic(
+                post_ids=it.source_post_ids or [], headline=it.headline, body_bullets=bullets,
+                primary_category=it.category_name or "AI",
+                importance_score=it.importance_score or 0.5,
+                sources=[], source_urls=it.source_urls or [],
+            ))
+
+        d = briefing.period_end or briefing.generated_at
+        date_str = d.strftime("%Y. %m. %d") if hasattr(d, "strftime") else str(d)[:10]
+        subject = f"[{ecfg.subject_prefix}] {date_str}"
+
+        # 독자층 지정이 있으면 그룹별, 없으면 to_addresses로 단일(중립) 발송
+        targets = ecfg.audiences if ecfg.audiences else {"": ecfg.to_addresses}
+        results: dict = {}
+        for persona, addrs in targets.items():
+            if not addrs:
+                continue
+            if persona and ecfg.curation_enabled:
+                curation = await self.ai_processor.generate_curation(topics, persona)
+            else:
+                curation = Curation(title="", paragraphs=[], kick="", categories={})
+            html = render_email_html(briefing, curation, "cid:logo", date_str)
+            ok = await self.notifier.send_html(
+                subject, html, briefing.content_text, addrs, ecfg.logo_path
+            )
+            results[persona or "default"] = {"sent": ok, "recipients": len(addrs)}
+        return results

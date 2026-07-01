@@ -44,6 +44,23 @@ class MergedTopic:
             self.source_urls = []
 
 
+@dataclass
+class CategoryCuration:
+    """카테고리별 큐레이션 (B-2: 후크 + 핵심 + 시사점)."""
+    hook: str
+    bullets: list[str]
+    insight: str
+
+
+@dataclass
+class Curation:
+    """독자층별 큐레이션. 전체(에디토리얼 리드 + 킥) + 카테고리별."""
+    title: str
+    paragraphs: list[str]
+    kick: str
+    categories: dict[str, CategoryCuration]
+
+
 class AIProcessor(Protocol):
     """AI 처리 파이프라인 인터페이스."""
 
@@ -61,4 +78,10 @@ class AIProcessor(Protocol):
 
     async def deduplicate_and_merge(self, posts: list[Post]) -> list[MergedTopic]:
         """중복 제거 및 유사 토픽 통합 브리핑 항목 생성."""
+        ...
+
+    async def generate_curation(
+        self, topics: list[MergedTopic], audience: str
+    ) -> Curation:
+        """독자층 맞춤 큐레이션 생성 (전체 리드 + 킥 + 카테고리별)."""
         ...

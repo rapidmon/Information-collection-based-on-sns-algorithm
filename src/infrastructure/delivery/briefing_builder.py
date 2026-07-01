@@ -17,7 +17,7 @@ from src.infrastructure.config.settings import BriefingConfig
 CATEGORY_KO = {
     "AI": "AI",
     "Semiconductor": "반도체",
-    "Cloud": "클라우드",
+    "Cloud": "클라우드·인프라",
     "Startup": "스타트업",
     "BigTech": "빅테크",
     "Regulation": "규제/정책",
@@ -53,8 +53,28 @@ class DefaultBriefingGenerator:
         period_end: datetime,
         total_posts_analyzed: int,
     ) -> Briefing:
-        # 중요도 기준 정렬 후 최대 항목 수 제한
+        # 중요도 기준 정렬
         merged_topics.sort(key=lambda t: t.importance_score, reverse=True)
+
+        # 병합 후 최종 점수 하한 (재산정된 저중요도 토픽 제거). 전부 잘리면 원본 유지.
+        min_imp = self._config.min_importance
+        filtered = [t for t in merged_topics if (t.importance_score or 0) >= min_imp]
+        if filtered:
+            merged_topics = filtered
+
+        # 카테고리별 상한 (한 카테고리가 브리핑을 뒤덮지 않게)
+        cap = self._config.max_per_category
+        if cap:
+            per_cat: dict[str, int] = {}
+            capped = []
+            for t in merged_topics:  # 이미 중요도 내림차순
+                c = t.primary_category or "Other"
+                per_cat[c] = per_cat.get(c, 0) + 1
+                if per_cat[c] <= cap:
+                    capped.append(t)
+            merged_topics = capped
+
+        # 전체 최대 항목 수 제한
         if self._config.max_items:
             merged_topics = merged_topics[: self._config.max_items]
 

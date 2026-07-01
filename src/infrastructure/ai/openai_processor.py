@@ -16,10 +16,18 @@ from openai import OpenAI
 from src.domain.entities import Post
 from duckduckgo_search import DDGS
 
-from src.domain.services.ai_processor import CategoryResult, FilterResult, MergedTopic, VerificationResult
+from src.domain.services.ai_processor import (
+    CategoryCuration,
+    CategoryResult,
+    Curation,
+    FilterResult,
+    MergedTopic,
+    VerificationResult,
+)
 from src.infrastructure.ai.prompts import (
     CATEGORIZE,
     CROSS_CHUNK_MERGE,
+    CURATION,
     DEDUPLICATE_AND_MERGE,
     EXTRACT_CLAIMS,
     FILTER_AND_SUMMARIZE,
@@ -85,6 +93,21 @@ def _posts_to_json_lite(posts: list[Post]) -> str:
             "url": p.url,
         })
     return json.dumps(items, ensure_ascii=False, indent=2)
+
+
+def _parse_json_object(text: str) -> dict[str, Any]:
+    """API 응답에서 JSON 객체({...})를 추출."""
+    text = text.strip()
+    if text.startswith("{"):
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            pass
+    start = text.find("{")
+    end = text.rfind("}") + 1
+    if start == -1 or end <= start:
+        raise ValueError(f"JSON 객체를 찾을 수 없음: {text[:200]}")
+    return json.loads(text[start:end])
 
 
 def _parse_json_response(text: str) -> list[dict[str, Any]]:
@@ -397,12 +420,62 @@ class OpenAIProcessor:
         num_chunks = (len(posts) - 1) // chunk_size + 1
         logger.info(f"1차 중복제거: {len(posts)}건 → {len(all_results)}개 토픽 ({num_chunks}개 청크)")
 
-        # 2차: 청크 간 중복 병합 (청크가 2개 이상이고 토픽이 2개 이상일 때만)
-        if num_chunks >= 2 and len(all_results) >= 2:
-            all_results = await self._cross_chunk_merge(all_results)
+        # 2차: 전역 통합 — 토픽이 2개 이상이면 항상 실행(단일 청크여도)
+        if len(all_results) >= 2:
+            all_results = await self._consolidate_topics(all_results)
 
         logger.info(f"최종 토픽 수: {len(all_results)}개")
         return all_results
+
+    async def generate_curation(self, topics: list[MergedTopic], audience: str) -> Curation:
+        """독자층 맞춤 큐레이션 생성 (1회 LLM 호출로 전체+카테고리별)."""
+        if not topics:
+            return Curation(title="", paragraphs=[], kick="", categories={})
+
+        by_cat: dict[str, list[MergedTopic]] = {}
+        for t in topics:
+            by_cat.setdefault(t.primary_category or "Other", []).append(t)
+
+        summary: dict[str, list[dict]] = {}
+        for cat, ts in by_cat.items():
+            ts = sorted(ts, key=lambda x: x.importance_score or 0, reverse=True)[:8]
+            summary[cat] = [
+                {"headline": t.headline,
+                 "fact": (t.body_bullets[0] if t.body_bullets else "")[:160]}
+                for t in ts
+            ]
+        topics_json = json.dumps(summary, ensure_ascii=False, indent=2)
+        prompt = CURATION.format(audience=audience, topics_json=topics_json)
+
+        try:
+            response_text = self._call_api(self._config.model_process, prompt, max_tokens=4096)
+            data = _parse_json_object(response_text)
+        except Exception as e:
+            logger.warning(f"큐레이션 생성 실패 (audience={audience}): {e}")
+            return Curation(title="", paragraphs=[], kick="", categories={})
+
+        overall = data.get("overall", {}) or {}
+        cats: dict[str, CategoryCuration] = {}
+        for cat, c in (data.get("categories", {}) or {}).items():
+            if not isinstance(c, dict):
+                continue
+            cats[cat] = CategoryCuration(
+                hook=str(c.get("hook", "")),
+                bullets=[str(b) for b in (c.get("bullets") or []) if b][:3],
+                insight=str(c.get("insight", "")),
+            )
+
+        curation = Curation(
+            title=str(overall.get("title", "")),
+            paragraphs=[str(p) for p in (overall.get("paragraphs") or []) if p][:3],
+            kick=str(overall.get("kick", "")),
+            categories=cats,
+        )
+        logger.info(
+            f"큐레이션 생성 완료 (audience={audience}): "
+            f"카테고리 {len(cats)}개, kick={'있음' if curation.kick else '없음'}"
+        )
+        return curation
 
     _KR_SUFFIXES = re.compile(
         r'(는|은|가|이|를|을|의|에|로|와|과|며|고|도|만|서|나|든|까지|에서|으로|하며|이며'
@@ -563,6 +636,69 @@ class OpenAIProcessor:
             sources=combined_sources,
             source_urls=combined_urls,
         )
+
+    async def _consolidate_topics(self, topics: list[MergedTopic]) -> list[MergedTopic]:
+        """최종 전역 통합. 토픽 수가 적당하면 전체를 LLM에 한 번에 보내 의미 기반 병합,
+        너무 많으면 토큰 유사도 기반(_cross_chunk_merge) 폴백."""
+        if len(topics) < 2:
+            return topics
+        if len(topics) <= 80:
+            merged = await self._global_llm_merge(topics)
+            if merged is not None:
+                logger.info(f"전역 통합(LLM): {len(topics)}개 → {len(merged)}개 토픽")
+                return merged
+        return await self._cross_chunk_merge(topics)
+
+    async def _global_llm_merge(self, topics: list[MergedTopic]) -> list[MergedTopic] | None:
+        """전체 토픽을 한 번의 LLM 호출로 의미 기반 병합. 실패 시 None."""
+        summary = []
+        for i, t in enumerate(topics):
+            first_bullet = t.body_bullets[0] if t.body_bullets else ""
+            summary.append({
+                "index": i,
+                "headline": t.headline,
+                "summary": first_bullet[:200],
+                "category": t.primary_category,
+            })
+        topics_json = json.dumps(summary, ensure_ascii=False, indent=2)
+        prompt = CROSS_CHUNK_MERGE.format(topics_json=topics_json)
+
+        try:
+            response_text = self._call_api(
+                self._config.model_process, prompt, max_tokens=8192
+            )
+            groups = _parse_json_response(response_text)
+        except Exception as e:
+            logger.warning(f"전역 통합 LLM 실패, 폴백 사용: {e}")
+            return None
+
+        merged_indices: set[int] = set()
+        result: list[MergedTopic] = []
+        for g in groups:
+            idxs = [
+                i for i in g.get("merge_indices", [])
+                if isinstance(i, int) and 0 <= i < len(topics) and i not in merged_indices
+            ]
+            if len(idxs) < 2:
+                continue
+            merged = self._merge_topic_group(topics, idxs)
+            if g.get("headline"):
+                merged.headline = g["headline"]
+            # LLM이 종합한 간결한 세부(≤3)가 있으면 채택(단순 이어붙이기 대체)
+            bullets = g.get("body_bullets")
+            if isinstance(bullets, list) and bullets:
+                merged.body_bullets = [str(b) for b in bullets if b][:3]
+            if isinstance(g.get("importance_score"), (int, float)):
+                merged.importance_score = max(merged.importance_score, g["importance_score"])
+            result.append(merged)
+            merged_indices.update(idxs)
+
+        # 병합되지 않은 토픽 그대로 유지
+        for i, t in enumerate(topics):
+            if i not in merged_indices:
+                result.append(t)
+
+        return result
 
     async def _cross_chunk_merge(self, topics: list[MergedTopic]) -> list[MergedTopic]:
         """청크 간 동일 사건 토픽을 2차 병합한다.

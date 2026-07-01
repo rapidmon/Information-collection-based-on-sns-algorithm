@@ -15,7 +15,7 @@ from typing import Optional
 from bs4 import BeautifulSoup, Tag
 
 from src.domain.entities import Post
-from src.infrastructure.collectors.cdp import cdp_connection
+from src.infrastructure.collectors.cdp import cdp_connection, minimize_window
 from src.infrastructure.config.settings import CollectorConfig
 
 logger = logging.getLogger(__name__)
@@ -60,6 +60,7 @@ class DCInsideCollector:
                 await page.goto(recommend_url, wait_until="domcontentloaded", timeout=30000)
                 logger.info(f"[dcinside] 새 탭으로 개념글 페이지 열기: {recommend_url}")
 
+            await minimize_window(page)
             await asyncio.sleep(random.uniform(1.0, 2.0))
 
             # 현재 페이지에서 게시물 목록 파싱 (최대 20건)

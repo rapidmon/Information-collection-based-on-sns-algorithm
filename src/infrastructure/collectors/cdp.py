@@ -40,6 +40,25 @@ async def cdp_connection(
         await pw.stop()
 
 
+async def minimize_window(page: Page) -> None:
+    """페이지가 속한 Chrome 창을 최소화한다(새 탭 열 때 포커스 뺏김 방지).
+
+    CDP Browser.setWindowBounds로 최소화. 최소화 상태에서도 GraphQL 인터셉트/
+    DOM 수집은 동작한다(입력·네트워크는 CDP로 주입되므로). 렌더 throttling을
+    막으려면 Chrome을 --disable-backgrounding-occluded-windows 등과 함께 실행.
+    """
+    try:
+        cdp = await page.context.new_cdp_session(page)
+        info = await cdp.send("Browser.getWindowForTarget")
+        await cdp.send("Browser.setWindowBounds", {
+            "windowId": info["windowId"],
+            "bounds": {"windowState": "minimized"},
+        })
+        await cdp.detach()
+    except Exception as e:
+        logger.debug(f"[{page.url[:30]}] 창 최소화 실패(무시): {e}")
+
+
 async def _reload_and_reconnect(pw: Playwright, cdp_url: str, source_name: str):
     """CDP 타임아웃 시 Chrome을 재시작한 뒤 재연결한다."""
     import asyncio
@@ -64,6 +83,11 @@ async def _reload_and_reconnect(pw: Playwright, cdp_url: str, source_name: str):
                 "--remote-debugging-port=9222",
                 f"--user-data-dir={user_data_dir}",
                 "--restore-last-session",
+                "--start-minimized",
+                # 백그라운드/최소화 상태에서도 수집 동작 (throttling 방지)
+                "--disable-backgrounding-occluded-windows",
+                "--disable-background-timer-throttling",
+                "--disable-renderer-backgrounding",
                 # 메모리 절약 플래그
                 "--disable-extensions",
                 "--disable-features=Translate,MediaRouter",

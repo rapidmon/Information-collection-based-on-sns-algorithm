@@ -104,7 +104,7 @@ email:
 **중요: 반드시 아래 명령어 그대로 실행하세요.** `--user-data-dir` 옵션으로 기본 Chrome 프로필과 분리된 별도 세션을 사용합니다.
 
 ```bash
-"C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222 --user-data-dir="C:\chrome_temp" --disable-extensions --disable-features=Translate,MediaRouter --disable-background-networking --js-flags="--max-old-space-size=512"
+"C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222 --user-data-dir="C:\chrome_temp" --start-minimized --disable-backgrounding-occluded-windows --disable-background-timer-throttling --disable-renderer-backgrounding --disable-extensions --disable-features=Translate,MediaRouter --disable-background-networking --js-flags="--max-old-space-size=512"
 ```
 
 > 추가 플래그는 메모리 절약용입니다(확장 비활성, 백그라운드 네트워킹 차단, V8 힙 상한 512MB).
@@ -312,10 +312,19 @@ sns_algorithm_data_collection/
 
 ### Cloudflare Tunnel 설정
 
+라우팅(`api.cnvjb.uk → localhost:8000`)은 Cloudflare 대시보드(원격 관리형 터널)에 설정돼 있으므로, 터널은 이름으로 실행만 하면 됩니다.
+
 ```bash
 # Cloudflare Tunnel 설치 후
-cloudflared tunnel run --url http://localhost:8000 sns-briefing
+cloudflared tunnel run sns-briefing
 ```
+
+> 터널은 `localhost:8000`으로 전달만 하므로 `python main.py serve`가 함께 떠 있어야 합니다.
+> 매번 켜기 번거로우면 윈도우 서비스로 등록해 자동 실행할 수 있습니다:
+> ```bash
+> cloudflared tunnel token sns-briefing        # 토큰 출력
+> cloudflared service install <출력된_토큰>      # 관리자 권한, 부팅 시 자동 시작
+> ```
 
 ---
 

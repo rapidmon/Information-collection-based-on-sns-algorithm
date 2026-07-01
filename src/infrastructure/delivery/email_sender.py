@@ -6,7 +6,9 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
+from email.mime.image import MIMEImage
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
@@ -73,6 +75,56 @@ class EmailNotifier:
 
         except Exception as e:
             logger.error(f"이메일 전송 실패: {e}")
+            return False
+
+    async def send_html(
+        self,
+        subject: str,
+        html: str,
+        text: str | None,
+        to_addresses: list[str],
+        logo_path: str | None = None,
+    ) -> bool:
+        """지정 수신자에게 HTML 메일 발송. logo_path가 있으면 cid:logo로 임베드."""
+        if not self._enabled:
+            logger.info("이메일 비활성화 상태 — 전송 건너뜀")
+            return False
+        if not to_addresses:
+            logger.warning("수신자 주소 없음 — 전송 건너뜀")
+            return False
+
+        try:
+            has_logo = bool(logo_path) and os.path.exists(logo_path)
+            if has_logo:
+                msg = MIMEMultipart("related")
+                alt = MIMEMultipart("alternative")
+                msg.attach(alt)
+                if text:
+                    alt.attach(MIMEText(text, "plain", "utf-8"))
+                alt.attach(MIMEText(html, "html", "utf-8"))
+                with open(logo_path, "rb") as f:
+                    img = MIMEImage(f.read())
+                img.add_header("Content-ID", "<logo>")
+                img.add_header("Content-Disposition", "inline", filename="logo.png")
+                msg.attach(img)
+            else:
+                msg = MIMEMultipart("alternative")
+                if text:
+                    msg.attach(MIMEText(text, "plain", "utf-8"))
+                msg.attach(MIMEText(html, "html", "utf-8"))
+
+            msg["Subject"] = subject
+            msg["From"] = self._from
+            msg["To"] = ", ".join(to_addresses)
+
+            await aiosmtplib.send(
+                msg, hostname=self._host, port=self._port, start_tls=True,
+                username=self._user, password=self._password,
+            )
+            logger.info(f"메일 전송 완료 → {', '.join(to_addresses)} | {subject}")
+            return True
+        except Exception as e:
+            logger.error(f"메일 전송 실패: {e}")
             return False
 
     async def send_alert(self, title: str, message: str) -> bool:

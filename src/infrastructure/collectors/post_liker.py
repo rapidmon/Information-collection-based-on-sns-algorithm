@@ -17,7 +17,7 @@ import logging
 import random
 
 from src.domain.entities import Post
-from src.infrastructure.collectors.cdp import cdp_connection
+from src.infrastructure.collectors.cdp import cdp_connection, minimize_window
 from src.infrastructure.config.settings import LikeConfig
 
 logger = logging.getLogger(__name__)
@@ -37,9 +37,11 @@ async def _find_like_button(page, source: str):
         )
         return handle.as_element()
     if source == "linkedin":
+        # LinkedIn은 좋아요를 '반응(추천)'으로 부른다. 미좋아요 상태의 aria-label은
+        # "반응 버튼 상태: 반응 없음"(KO) / "...No reaction"(EN). 이미 누른 경우 "...추천"이 되어
+        # 매칭에서 빠진다. (게시물의 반응 버튼만 매칭; 댓글은 "반응 메뉴 열기"라 제외됨)
         return await page.query_selector(
-            'button[aria-label*="좋아요"]:not([aria-pressed="true"]), '
-            'button[aria-label*="Like"]:not([aria-pressed="true"])'
+            'button[aria-label*="반응 없음"], button[aria-label*="No reaction"]'
         )
     return None
 
@@ -59,6 +61,7 @@ class CdpPostLiker:
         try:
             async with cdp_connection(self._cdp_url, source) as (pw, context):
                 page = await context.new_page()
+                await minimize_window(page)
                 try:
                     for post in posts:
                         if len(done) >= self._cfg.max_per_run:
@@ -78,13 +81,24 @@ class CdpPostLiker:
         logger.info(f"[{source}][like] 좋아요 {len(done)}건 ({mode})")
         return done
 
+    async def _wait_for_like_button(self, page, source: str, timeout_ms: int = 8000):
+        """좋아요 버튼이 렌더될 때까지 폴링(고정 sleep보다 견고)."""
+        elapsed = 0
+        step = 500
+        while elapsed < timeout_ms:
+            btn = await _find_like_button(page, source)
+            if btn:
+                return btn
+            await page.wait_for_timeout(step)
+            elapsed += step
+        return None
+
     async def _like_one(self, page, source: str, post: Post) -> bool:
         snippet = (post.summary or post.content_text or "")[:60].replace("\n", " ")
         try:
             await page.goto(post.url, wait_until="domcontentloaded", timeout=20000)
-            await page.wait_for_timeout(2500)  # 좋아요 버튼 렌더 대기
 
-            btn = await _find_like_button(page, source)
+            btn = await self._wait_for_like_button(page, source)
             if not btn:
                 logger.warning(
                     f"[{source}][like] 좋아요 버튼 못찾음(이미 좋아요했거나 셀렉터 불일치): "

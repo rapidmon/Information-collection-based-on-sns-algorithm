@@ -25,8 +25,13 @@ import shutil
 import subprocess
 import tempfile
 
-from src.infrastructure.ai.openai_processor import OpenAIProcessor
-from src.infrastructure.ai.prompts import SYSTEM_PROMPT
+from src.domain.services.ai_processor import VerificationResult
+from src.infrastructure.ai.openai_processor import (
+    OpenAIProcessor,
+    _parse_json_response,
+    _posts_to_json_lite,
+)
+from src.infrastructure.ai.prompts import EXTRACT_CLAIMS, SYSTEM_PROMPT, VERIFY_WITH_SEARCH
 from src.infrastructure.config.settings import ProcessingConfig
 
 logger = logging.getLogger(__name__)
@@ -147,3 +152,80 @@ class ClaudeCodeProcessor(OpenAIProcessor):
         # 봉투의 result 필드에 모델의 실제 텍스트(요구한 JSON 배열)가 담겨 있다.
         # base의 _parse_json_response가 코드펜스/잡텍스트를 걸러 배열만 추출한다.
         return envelope.get("result", "")
+
+    def _call_api_with_search(self, prompt: str, max_turns: int = 15) -> str:
+        """WebSearch 도구를 허용해 Claude가 직접 웹을 검색하며 응답하게 한다(구독, API 키 X)."""
+        full_prompt = f"{SYSTEM_PROMPT}\n\n{prompt}"
+        args = [
+            "-p", "--output-format", "json",
+            "--allowedTools", "WebSearch",
+            "--max-turns", str(max_turns),
+        ]
+        if self._claude_model_filter:
+            args += ["--model", self._claude_model_filter]
+        cmd = self._build_command(args)
+
+        try:
+            proc = subprocess.run(
+                cmd, input=full_prompt, capture_output=True, text=True,
+                encoding="utf-8", cwd=self._work_dir, env=self._env, timeout=self._timeout,
+            )
+        except subprocess.TimeoutExpired as e:
+            raise RuntimeError(f"claude WebSearch 타임아웃({self._timeout}s)") from e
+        if proc.returncode != 0:
+            raise RuntimeError(f"claude WebSearch 종료코드 {proc.returncode}: {(proc.stderr or '')[:300]}")
+        envelope = json.loads(proc.stdout)
+        if envelope.get("is_error"):
+            raise RuntimeError(f"claude WebSearch 오류: {str(envelope.get('result'))[:300]}")
+        return envelope.get("result", "")
+
+    async def verify_claims(self, posts: list) -> list:
+        """Claude 내장 WebSearch로 교차검증(DuckDuckGo 미사용). 실패 시 전체 통과.
+
+        A) 검색+판정을 Claude가 직접(구독). C) 검증 대상 주장 상한으로 호출 절감.
+        """
+        if not posts:
+            return []
+
+        try:
+            resp = self._call_api(
+                self._config.model_filter,
+                EXTRACT_CLAIMS.format(posts_json=_posts_to_json_lite(posts)),
+            )
+            claims = _parse_json_response(resp)
+        except Exception as e:
+            logger.warning(f"주장 추출 실패(검증 스킵): {e}")
+            return [VerificationResult(post_id=p.id, credibility="verified") for p in posts]
+
+        to_verify = [c for c in claims if c.get("needs_verification") and c.get("claim")]
+        to_verify = to_verify[: self._config.verify_max_claims]  # C: 상한
+        if not to_verify:
+            return [VerificationResult(post_id=p.id, credibility="verified") for p in posts]
+
+        claims_json = json.dumps(
+            [{"post_id": c["post_id"], "claim": c["claim"]} for c in to_verify],
+            ensure_ascii=False, indent=2,
+        )
+        results: list = []
+        verified_ids: set = set()
+        try:
+            resp = self._call_api_with_search(VERIFY_WITH_SEARCH.format(claims_json=claims_json))
+            for item in _parse_json_response(resp):
+                results.append(VerificationResult(
+                    post_id=item["post_id"],
+                    credibility=item.get("credibility", "unverified"),
+                    reason=item.get("reason"),
+                ))
+                verified_ids.add(item["post_id"])
+        except Exception as e:
+            logger.warning(f"Claude 웹검증 실패(스킵/통과): {e}")
+
+        for p in posts:
+            if p.id not in verified_ids:
+                results.append(VerificationResult(post_id=p.id, credibility="verified"))
+
+        contradicted = sum(1 for r in results if r.credibility == "contradicted")
+        logger.info(
+            f"웹검증(Claude WebSearch) 완료: {len(to_verify)}건 검증, 허위/스캠 {contradicted}건"
+        )
+        return results

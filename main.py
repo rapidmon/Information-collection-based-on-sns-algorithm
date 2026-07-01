@@ -144,7 +144,7 @@ def main() -> None:
     # collect-now 명령
     collect_parser = subparsers.add_parser("collect-now", help="즉시 수집 실행")
     collect_parser.add_argument(
-        "sources", nargs="*", default=["twitter", "threads", "linkedin", "dcinside"],
+        "sources", nargs="*", default=["twitter", "threads", "linkedin", "dcinside", "36kr"],
         help="수집할 소스 (기본: 전부)",
     )
 

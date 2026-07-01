@@ -95,6 +95,8 @@ class ProcessingConfig:
         self.use_batch_api: bool = data.get("use_batch_api", True)
         self.min_importance_for_briefing: float = data.get("min_importance_for_briefing", 0.7)
         self.dedup_chunk_size: int = data.get("dedup_chunk_size", 80)
+        # verify_claims: 웹검증 대상 주장 상한(C) — 호출/쿼터 절감
+        self.verify_max_claims: int = data.get("verify_max_claims", 8)
         self.processing_interval_minutes: int = data.get("processing_interval_minutes", 30)
         self.min_posts_to_process: int = data.get("min_posts_to_process", 5)
 
@@ -120,12 +122,20 @@ class BriefingConfig:
         self.daily_time: str = data.get("daily_time", "06:30")
         self.max_items: int = data.get("max_items", 0)
         self.include_stats: bool = data.get("include_stats", True)
+        # 병합 후(재산정) 점수 기준 하한 + 카테고리별 상한 (항목 과다 방지)
+        self.min_importance: float = data.get("min_importance", 0.8)
+        self.max_per_category: int = data.get("max_per_category", 8)
 
 
 class EmailConfig:
     def __init__(self, data: dict[str, Any]):
         self.enabled: bool = data.get("enabled", True)
         self.to_addresses: list[str] = data.get("to_addresses", [])
+        # 독자층별 발송: {페르소나(=큐레이션 대상): [수신주소]}
+        self.audiences: dict[str, list[str]] = data.get("audiences", {}) or {}
+        self.curation_enabled: bool = data.get("curation", True)
+        self.logo_path: str = data.get("logo_path", "Logo.png")
+        self.subject_prefix: str = data.get("subject_prefix", "Morning Commit")
 
 
 class WebConfig:

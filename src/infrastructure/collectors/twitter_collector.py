@@ -14,7 +14,7 @@ from typing import Any, Optional
 
 from src.domain.entities import Post
 from src.domain.exceptions import SessionExpiredError
-from src.infrastructure.collectors.cdp import cdp_connection, check_session
+from src.infrastructure.collectors.cdp import cdp_connection, check_session, minimize_window
 from src.infrastructure.config.settings import CollectorConfig, SnsCredentials
 
 logger = logging.getLogger(__name__)
@@ -93,6 +93,7 @@ class TwitterCollector:
         """Chrome CDP로 연결하여 GraphQL 인터셉트 방식으로 타임라인을 수집한다."""
         async with cdp_connection(self._cdp_url, "twitter") as (pw, context):
             page = await context.new_page()
+            await minimize_window(page)
             captured: list[dict[str, Any]] = []
 
             async def on_response(response):
