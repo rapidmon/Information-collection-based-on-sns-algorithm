@@ -21,18 +21,32 @@ async def cdp_connection(
     """Chrome CDP 연결 context manager.
 
     Yields (playwright, context). 종료 시 playwright를 정리한다.
-    첫 연결 실패 시 기존 탭을 reload한 뒤 한 번 재시도한다.
+    연결 실패 시 짧게 재시도만 하고, 그래도 안 되면 예외를 던져 이번 사이클을
+    건너뛴다. (예전처럼 taskkill로 Chrome을 죽이고 재실행하지 않는다 — 사용자의
+    기존 창을 유지하고 창이 불어나는 것을 막기 위함. 디버그 Chrome이 꺼져 있으면
+    로그만 남기고 스킵하니, 9222 디버그 Chrome을 켜두면 된다.)
     """
+    import asyncio
+
     pw = await async_playwright().start()
-    try:
-        browser = await pw.chromium.connect_over_cdp(cdp_url)
-    except Exception:
+    browser = None
+    last_err: Exception | None = None
+    for attempt in range(3):
         try:
-            browser = await _reload_and_reconnect(pw, cdp_url, source_name)
+            browser = await pw.chromium.connect_over_cdp(cdp_url, timeout=10000)
+            break
         except Exception as e:
-            await pw.stop()
-            logger.error(f"[{source_name}] Chrome 연결 실패: {e}")
-            raise
+            last_err = e
+            if attempt < 2:
+                await asyncio.sleep(2)
+
+    if browser is None:
+        await pw.stop()
+        logger.error(
+            f"[{source_name}] Chrome CDP 연결 실패 ({cdp_url}) — "
+            f"9222 디버그 Chrome이 켜져 있는지 확인하세요. 이번 수집은 건너뜁니다: {last_err}"
+        )
+        raise last_err if last_err else RuntimeError("CDP 연결 실패")
 
     try:
         yield pw, browser.contexts[0]
@@ -83,70 +97,6 @@ async def minimize_window(page: Page) -> None:
         await cdp.detach()
     except Exception as e:
         logger.debug(f"[{page.url[:30]}] 창 최소화 실패(무시): {e}")
-
-
-async def _reload_and_reconnect(pw: Playwright, cdp_url: str, source_name: str):
-    """CDP 타임아웃 시 Chrome을 재시작한 뒤 재연결한다."""
-    import asyncio
-    import subprocess
-
-    logger.info(f"[{source_name}] CDP 응답 없음 — Chrome 재시작 후 재시도")
-
-    # 기존 Chrome 프로세스에서 user-data-dir 추출
-    user_data_dir = _get_chrome_user_data_dir()
-
-    try:
-        subprocess.run(["taskkill", "/F", "/IM", "chrome.exe"], capture_output=True, timeout=5)
-    except Exception:
-        pass
-
-    await asyncio.sleep(2)
-
-    try:
-        subprocess.Popen(
-            [
-                r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-                "--remote-debugging-port=9222",
-                f"--user-data-dir={user_data_dir}",
-                "--restore-last-session",
-                "--start-minimized",
-                # 백그라운드/최소화 상태에서도 수집 동작 (throttling 방지)
-                "--disable-backgrounding-occluded-windows",
-                "--disable-background-timer-throttling",
-                "--disable-renderer-backgrounding",
-                # 메모리 절약 플래그
-                "--disable-extensions",
-                "--disable-features=Translate,MediaRouter",
-                "--disable-background-networking",
-                "--js-flags=--max-old-space-size=512",
-            ],
-        )
-    except Exception as e:
-        logger.error(f"[{source_name}] Chrome 재시작 실패: {e}")
-        raise
-
-    await asyncio.sleep(5)
-    return await pw.chromium.connect_over_cdp(cdp_url)
-
-
-def _get_chrome_user_data_dir() -> str:
-    """실행 중인 Chrome의 --user-data-dir 값을 추출한다."""
-    import subprocess
-    try:
-        result = subprocess.run(
-            ["wmic", "process", "where",
-             "name='chrome.exe' and commandline like '%remote-debugging%'",
-             "get", "commandline"],
-            capture_output=True, text=True, timeout=5,
-        )
-        for line in result.stdout.splitlines():
-            if "--user-data-dir=" in line:
-                for part in line.split():
-                    if part.startswith("--user-data-dir="):
-                        return part.split("=", 1)[1].strip('"')
-    except Exception:
-        pass
-    return r"C:\chrome_temp"
 
 
 async def check_session(
