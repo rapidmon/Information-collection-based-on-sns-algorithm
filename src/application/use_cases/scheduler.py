@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.date import DateTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from src.domain.exceptions import SessionExpiredError
@@ -51,11 +52,25 @@ class Orchestrator:
                 name=f"Collect {source}",
                 max_instances=1,
                 misfire_grace_time=1800,  # AI 처리로 루프가 막혀도 스킵 안 되게 넉넉히
-                next_run_time=first_run,  # 시작 직후 즉시 실행 없음 — 정렬된 첫 슬롯부터
+                next_run_time=first_run,  # 정렬된 첫 슬롯(이른 슬롯은 건너뜀)
             )
+
+            # 서버 시작 직후 1회 즉시 수집 (스태거 적용) — 정렬 스케줄과 별개의 일회성 잡
+            startup_time = now + timedelta(minutes=stagger_minutes)
+            self.scheduler.add_job(
+                self._run_collection,
+                trigger=DateTrigger(run_date=startup_time, timezone=self._tz),
+                args=[source],
+                id=f"collect_{source}_startup",
+                name=f"Collect {source} (startup)",
+                max_instances=1,
+                misfire_grace_time=300,
+            )
+
             logger.info(
-                f"수집 작업 등록: {source} (매 {cfg.interval_minutes}분, KST 정렬, "
-                f"첫 실행 {first_run.strftime('%H:%M') if first_run else '?'})"
+                f"수집 작업 등록: {source} (매 {cfg.interval_minutes}분, KST 정렬 / "
+                f"시작 직후 1회 {startup_time.strftime('%H:%M')}, 정렬 첫 슬롯 "
+                f"{first_run.strftime('%H:%M') if first_run else '?'})"
             )
             stagger_minutes += 2
 
