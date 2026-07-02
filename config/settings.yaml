@@ -130,8 +130,10 @@ email:
   audiences:
     "국내 개발자":
       - "ehhwll@hanmail.net"
-      - "dianadbwls@gmail.com"
+    "UX·프로덕트·비주얼 디자인 실무자":     # 디자이너
       - "jey.sieun@gmail.com"
+    "AI 기술에 관심 많은 실무자·일반 독자":  # AI 관심
+      - "dianadbwls@gmail.com"
       - "jetti0915@gmail.com"
     "국내 CS 취준생 및 주니어 개발자":
       - "ndbsrjsdn@naver.com"
