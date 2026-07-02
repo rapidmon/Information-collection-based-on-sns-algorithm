@@ -130,8 +130,9 @@ email:
   audiences:
     "국내 개발자":
       - "ehhwll@hanmail.net"
-      - "sbemls@donga.com"
-      - "jey_sieun@donga.com"
+      - "dianadbwls@gmail.com"
+      - "jey.sieun@gmail.com"
+      - "jetti0915@gmail.com"
     "국내 CS 취준생 및 주니어 개발자":
       - "ndbsrjsdn@naver.com"
   # 폴백 (audiences 비울 때만 사용 — 큐레이션 없이 중립 발송)
