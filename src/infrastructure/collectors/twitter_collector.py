@@ -118,8 +118,10 @@ class TwitterCollector:
                     await page.goto(self.FEED_URL, wait_until="domcontentloaded", timeout=60000)
                 await page.wait_for_timeout(3000)  # 타임라인 API 응답 대기
 
-                if "login" in page.url or "flow" in page.url:
-                    raise SessionExpiredError("twitter — Chrome에서 X에 로그인 해주세요")
+                # 로그인 상태 확인: 로그인돼 있으면 /home에 머문다. 로그아웃 시 X는
+                # 랜딩(x.com/)이나 로그인 플로우로 튕기므로 url에 /home이 없으면 세션 만료.
+                if "login" in page.url or "flow" in page.url or "/home" not in page.url:
+                    raise SessionExpiredError("twitter — Chrome에서 X에 로그인 해주세요 (로그아웃 감지)")
 
                 for _ in range(self._config.scroll_rounds):
                     await page.mouse.wheel(0, random.randint(800, 1500))
