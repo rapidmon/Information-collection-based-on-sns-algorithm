@@ -106,18 +106,18 @@ email:
 > ⚠️ **먼저 이 명령으로 띄운 디버그 Chrome이 이미 떠 있으면 그걸 그대로 쓰세요.** 수집기는 이 창의 **기존 탭을 재사용**하므로, 서버가 새 창을 계속 띄우지 않습니다. (디버그 Chrome이 완전히 닫혀 CDP가 끊긴 경우에만 자동으로 한 번 재실행합니다.)
 
 ```bash
-"C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222 --user-data-dir="C:\chrome_temp" --restore-last-session --start-minimized --disable-backgrounding-occluded-windows --disable-background-timer-throttling --disable-renderer-backgrounding --disable-extensions --disable-features=Translate,MediaRouter --disable-background-networking --js-flags="--max-old-space-size=512"
+"C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222 --user-data-dir="C:\chrome_temp" --restore-last-session --start-minimized --disable-backgrounding-occluded-windows --disable-background-timer-throttling --disable-renderer-backgrounding --disable-extensions --disable-features=Translate,MediaRouter --disable-background-networking --js-flags="--max-old-space-size=2048"
 ```
 
-> 추가 플래그: `--restore-last-session`(세션 복원), `--start-minimized`(최소화 시작), 나머지는 메모리·throttling 절약용(확장 비활성, 백그라운드 네트워킹 차단, V8 힙 상한 512MB).
+> 추가 플래그: `--restore-last-session`(세션 복원), `--start-minimized`(최소화 시작), 나머지는 메모리·throttling 절약용(확장 비활성, 백그라운드 네트워킹 차단, V8 힙 상한 2048MB). 힙 상한을 512MB로 두면 X·LinkedIn 같은 무거운 페이지에서 GC 폭주·렌더러 불안정으로 CDP가 먹통이 될 수 있어 2048MB로 완화했습니다.
 
 > Mac/Linux의 경우:
 > ```bash
 > # Mac
-> /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=9222 --user-data-dir="/tmp/chrome_temp" --restore-last-session --disable-extensions --disable-features=Translate,MediaRouter --disable-background-networking --js-flags="--max-old-space-size=512"
+> /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=9222 --user-data-dir="/tmp/chrome_temp" --restore-last-session --disable-extensions --disable-features=Translate,MediaRouter --disable-background-networking --js-flags="--max-old-space-size=2048"
 >
 > # Linux
-> google-chrome --remote-debugging-port=9222 --user-data-dir="/tmp/chrome_temp" --restore-last-session --disable-extensions --disable-features=Translate,MediaRouter --disable-background-networking --js-flags="--max-old-space-size=512"
+> google-chrome --remote-debugging-port=9222 --user-data-dir="/tmp/chrome_temp" --restore-last-session --disable-extensions --disable-features=Translate,MediaRouter --disable-background-networking --js-flags="--max-old-space-size=2048"
 > ```
 
 이 Chrome 창에서 수집하고 싶은 SNS에 로그인하세요:
