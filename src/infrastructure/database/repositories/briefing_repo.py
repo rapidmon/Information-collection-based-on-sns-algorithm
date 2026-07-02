@@ -42,6 +42,8 @@ def _item_to_dict(item: BriefingItem) -> dict[str, Any]:
         "sources_summary": item.sources_summary,
         "source_post_ids": item.source_post_ids,
         "source_urls": item.source_urls,
+        "tier": getattr(item, "tier", "minor"),
+        "score_features": getattr(item, "score_features", {}) or {},
     }
 
 
@@ -59,6 +61,8 @@ def _briefing_from_doc(doc) -> Briefing:
             sources_summary=i.get("sources_summary", ""),
             source_post_ids=i.get("source_post_ids", []),
             source_urls=i.get("source_urls", []),
+            tier=i.get("tier", "minor"),
+            score_features=i.get("score_features", {}) or {},
         )
         for i in items_data
     ]

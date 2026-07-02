@@ -16,7 +16,7 @@ from typing import Optional
 
 from src.domain.entities import Post
 from src.domain.exceptions import SessionExpiredError
-from src.infrastructure.collectors.cdp import auto_login, cdp_connection, check_session, minimize_window
+from src.infrastructure.collectors.cdp import auto_login, cdp_connection, check_session, get_or_create_page, minimize_window
 from src.infrastructure.config.settings import CollectorConfig, SnsCredentials
 
 logger = logging.getLogger(__name__)
@@ -71,7 +71,7 @@ class LinkedInCollector:
     async def collect(self) -> list[Post]:
         """DOM 파싱으로 LinkedIn 피드를 수집."""
         async with cdp_connection(self._cdp_url, "linkedin") as (pw, context):
-            page = await context.new_page()
+            page = await get_or_create_page(context, "linkedin.com")  # 기존 LinkedIn 탭 재사용
             await minimize_window(page)
 
             try:
@@ -111,7 +111,7 @@ class LinkedInCollector:
                 return posts
 
             finally:
-                await page.close()
+                pass  # 탭을 닫지 않고 남겨 다음 수집에 재사용
 
     async def _get_feed_items(self, page) -> list:
         """피드에서 실제 게시물 항목만 추출한다."""

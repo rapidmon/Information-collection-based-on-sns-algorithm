@@ -32,6 +32,7 @@ class EmailNotifier:
         self._password = settings.smtp_password
         self._from = settings.email_from
         self._to_addresses = email_config.to_addresses
+        self._alert_addresses = email_config.alert_addresses
         self._enabled = email_config.enabled
         self._alert_last_sent: dict[str, float] = {}
 
@@ -93,43 +94,59 @@ class EmailNotifier:
             logger.warning("수신자 주소 없음 — 전송 건너뜀")
             return False
 
-        try:
-            has_logo = bool(logo_path) and os.path.exists(logo_path)
-            if has_logo:
-                msg = MIMEMultipart("related")
-                alt = MIMEMultipart("alternative")
-                msg.attach(alt)
-                if text:
-                    alt.attach(MIMEText(text, "plain", "utf-8"))
-                alt.attach(MIMEText(html, "html", "utf-8"))
+        has_logo = bool(logo_path) and os.path.exists(logo_path)
+        logo_bytes = None
+        if has_logo:
+            try:
                 with open(logo_path, "rb") as f:
-                    img = MIMEImage(f.read())
-                img.add_header("Content-ID", "<logo>")
-                img.add_header("Content-Disposition", "inline", filename="logo.png")
-                msg.attach(img)
-            else:
-                msg = MIMEMultipart("alternative")
-                if text:
-                    msg.attach(MIMEText(text, "plain", "utf-8"))
-                msg.attach(MIMEText(html, "html", "utf-8"))
+                    logo_bytes = f.read()
+            except Exception:
+                logo_bytes = None
 
-            msg["Subject"] = subject
-            msg["From"] = self._from
-            msg["To"] = ", ".join(to_addresses)
+        # 수신자별로 '개별 발송' — 서로 주소 노출 안 되고, 단체 To보다 스팸 점수가 낮음
+        unsub = f"<mailto:{self._from}?subject=unsubscribe>"
+        sent = 0
+        for addr in to_addresses:
+            try:
+                if logo_bytes is not None:
+                    msg = MIMEMultipart("related")
+                    alt = MIMEMultipart("alternative")
+                    msg.attach(alt)
+                    if text:
+                        alt.attach(MIMEText(text, "plain", "utf-8"))
+                    alt.attach(MIMEText(html, "html", "utf-8"))
+                    img = MIMEImage(logo_bytes)
+                    img.add_header("Content-ID", "<logo>")
+                    img.add_header("Content-Disposition", "inline", filename="logo.png")
+                    msg.attach(img)
+                else:
+                    msg = MIMEMultipart("alternative")
+                    if text:
+                        msg.attach(MIMEText(text, "plain", "utf-8"))
+                    msg.attach(MIMEText(html, "html", "utf-8"))
 
-            await aiosmtplib.send(
-                msg, hostname=self._host, port=self._port, start_tls=True,
-                username=self._user, password=self._password,
-            )
-            logger.info(f"메일 전송 완료 → {', '.join(to_addresses)} | {subject}")
-            return True
-        except Exception as e:
-            logger.error(f"메일 전송 실패: {e}")
-            return False
+                msg["Subject"] = subject
+                msg["From"] = self._from
+                msg["To"] = addr
+                # 정상 뉴스레터로 인식되도록 수신거부 헤더 추가 (스팸 판정 완화)
+                msg["List-Unsubscribe"] = unsub
+                msg["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
+
+                await aiosmtplib.send(
+                    msg, hostname=self._host, port=self._port, start_tls=True,
+                    username=self._user, password=self._password,
+                )
+                sent += 1
+            except Exception as e:
+                logger.error(f"메일 전송 실패 → {addr}: {e}")
+
+        if sent:
+            logger.info(f"메일 전송 완료 → {sent}/{len(to_addresses)}명 | {subject}")
+        return sent > 0
 
     async def send_alert(self, title: str, message: str) -> bool:
         """시스템 알림 이메일 전송 (동일 제목 1시간 쿨다운)."""
-        if not self._enabled or not self._to_addresses:
+        if not self._enabled or not self._alert_addresses:
             return False
 
         now = time.monotonic()
@@ -142,7 +159,7 @@ class EmailNotifier:
             msg = MIMEMultipart()
             msg["Subject"] = f"[SNS Briefing 알림] {title}"
             msg["From"] = self._from
-            msg["To"] = ", ".join(self._to_addresses)
+            msg["To"] = ", ".join(self._alert_addresses)
             msg.attach(MIMEText(message, "plain", "utf-8"))
 
             await aiosmtplib.send(

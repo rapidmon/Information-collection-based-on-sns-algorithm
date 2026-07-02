@@ -131,11 +131,32 @@ class EmailConfig:
     def __init__(self, data: dict[str, Any]):
         self.enabled: bool = data.get("enabled", True)
         self.to_addresses: list[str] = data.get("to_addresses", [])
+        # 시스템 알림(로그인 오류·수집 실패 등) 수신자 — 브리핑 수신자와 별개
+        self.alert_addresses: list[str] = data.get("alert_addresses", ["ehhwll@hanmail.net"])
         # 독자층별 발송: {페르소나(=큐레이션 대상): [수신주소]}
         self.audiences: dict[str, list[str]] = data.get("audiences", {}) or {}
         self.curation_enabled: bool = data.get("curation", True)
         self.logo_path: str = data.get("logo_path", "Logo.png")
         self.subject_prefix: str = data.get("subject_prefix", "Morning Commit")
+
+
+class ScoringConfig:
+    """브리핑 중요도 산정 가중치 (객관 신호 + LLM 티어 보정).
+
+    최종 점수 = freq_weight*고유출처수 + engagement_weight*인게이지먼트백분위 + tier_bonus[tier]
+    를 그날 최고점이 1.0이 되도록 정규화. 피드백 학습으로 이 가중치를 조정한다.
+    """
+
+    def __init__(self, data: dict[str, Any]):
+        self.freq_weight: float = data.get("freq_weight", 0.05)
+        self.engagement_weight: float = data.get("engagement_weight", 0.4)
+        self.tier_bonus: dict[str, float] = data.get(
+            "tier_bonus", {"major": 1.0, "notable": 0.4, "minor": 0.0}
+        )
+        # 인게이지먼트 원점수 가중 (좋아요·리포스트·댓글)
+        self.w_likes: float = data.get("w_likes", 1.0)
+        self.w_reposts: float = data.get("w_reposts", 2.0)
+        self.w_comments: float = data.get("w_comments", 1.5)
 
 
 class WebConfig:
@@ -169,6 +190,7 @@ class AppConfig:
         self.processing = ProcessingConfig(data.get("processing", {}))
         self.like = LikeConfig(data.get("like", {}))
         self.briefing = BriefingConfig(data.get("briefing", {}))
+        self.scoring = ScoringConfig(data.get("scoring", {}))
         self.email = EmailConfig(data.get("email", {}))
         self.web = WebConfig(data.get("web", {}))
 

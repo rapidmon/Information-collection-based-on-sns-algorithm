@@ -1,0 +1,115 @@
+"""브리핑 중요도 스코어러 (객관 신호 기반).
+
+클러스터링(같은 사건 병합)이 끝난 토픽에 대해, **주관적 LLM 자유 점수 대신**
+아래 객관 신호와 LLM 티어(등급) 보정을 결합해 중요도를 산정한다.
+
+  최종 raw = freq_weight × 고유출처수
+           + engagement_weight × 인게이지먼트_백분위(플랫폼별)
+           + tier_bonus[tier]
+  → 그날 최고점이 1.0이 되도록 정규화.
+
+각 토픽에 `importance_score`(정규화값)와 `score_features`(채점 근거 스냅샷)를
+채워 넣는다. 스냅샷은 나중에 사용자 피드백(적절/과대/과소)과 짝지어 가중치를
+학습·보정하는 데 쓰인다.
+"""
+
+from __future__ import annotations
+
+import bisect
+import logging
+
+from src.domain.services.ai_processor import MergedTopic
+from src.infrastructure.config.settings import ScoringConfig
+
+logger = logging.getLogger(__name__)
+
+
+def _engagement_raw(post, cfg: ScoringConfig) -> float:
+    """게시물 인게이지먼트 원점수 (좋아요·리포스트·댓글 가중합)."""
+    likes = post.engagement_likes or 0
+    reposts = post.engagement_reposts or 0
+    comments = post.engagement_comments or 0
+    return likes * cfg.w_likes + reposts * cfg.w_reposts + comments * cfg.w_comments
+
+
+def _percentile_baselines(posts, cfg: ScoringConfig) -> dict[str, list[float]]:
+    """플랫폼별 인게이지먼트 원점수 정렬 리스트 (백분위 계산용)."""
+    by_src: dict[str, list[float]] = {}
+    for p in posts:
+        by_src.setdefault(p.source, []).append(_engagement_raw(p, cfg))
+    for src in by_src:
+        by_src[src].sort()
+    return by_src
+
+
+def _percentile(sorted_vals: list[float], v: float) -> float:
+    """정렬된 값들 중 v 이하의 비율 (0.0~1.0)."""
+    if not sorted_vals:
+        return 0.0
+    idx = bisect.bisect_right(sorted_vals, v)
+    return idx / len(sorted_vals)
+
+
+def score_topics(
+    topics: list[MergedTopic],
+    post_map: dict,
+    baseline_posts: list,
+    cfg: ScoringConfig,
+) -> None:
+    """토픽별 중요도 점수 + 피처 스냅샷을 계산해 in-place로 설정한다.
+
+    - topics: 클러스터링·티어 판정이 끝난 토픽들 (t.tier 설정되어 있어야 함)
+    - post_map: {post.id: Post} — 토픽 구성 게시물 조회용
+    - baseline_posts: 인게이지먼트 백분위 산정 모집단 (그날 후보 게시물 전체)
+    """
+    if not topics:
+        return
+
+    pmaps = _percentile_baselines(baseline_posts, cfg)
+    raws: list[float] = []
+
+    for t in topics:
+        members = [post_map[pid] for pid in (t.post_ids or []) if pid in post_map]
+
+        # ① 빈도 = 고유 출처 수 (같은 계정 중복 제거; 여러 계정이 다룰수록 화제)
+        authors = {(m.source, (m.author or m.id or "")) for m in members}
+        freq = len(authors) if authors else max(1, len(t.post_ids or []))
+
+        # ② 인게이지먼트 = 구성 게시물 중 '플랫폼별 백분위' 최고값 (플랫폼 스케일 차이 보정)
+        eng = 0.0
+        for m in members:
+            pct = _percentile(pmaps.get(m.source, []), _engagement_raw(m, cfg))
+            eng = max(eng, pct)
+
+        # ③ 티어 보정 (LLM 절대 등급)
+        tier = (t.tier or "minor").lower()
+        tier_bonus = cfg.tier_bonus.get(tier, 0.0)
+
+        freq_comp = cfg.freq_weight * freq
+        eng_comp = cfg.engagement_weight * eng
+        raw = freq_comp + eng_comp + tier_bonus
+
+        t.score_features = {
+            "frequency": freq,
+            "engagement_pct": round(eng, 3),
+            "tier": tier,
+            "freq_comp": round(freq_comp, 4),
+            "eng_comp": round(eng_comp, 4),
+            "tier_comp": round(tier_bonus, 4),
+            "raw": round(raw, 4),
+        }
+        raws.append(raw)
+
+    # 정규화: 그날 최고점 = 1.0
+    mx = max(raws) if raws else 1.0
+    if mx <= 0:
+        mx = 1.0
+    for t in topics:
+        final = round((t.score_features.get("raw", 0.0)) / mx, 4)
+        t.importance_score = final
+        t.score_features["final"] = final
+
+    logger.info(
+        f"중요도 산정 완료: {len(topics)}개 토픽 (정규화 max=1.0, "
+        f"major={sum(1 for t in topics if t.tier == 'major')}건)"
+    )

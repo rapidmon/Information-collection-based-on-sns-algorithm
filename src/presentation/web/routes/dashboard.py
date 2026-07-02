@@ -64,16 +64,22 @@ async def briefing_archive(request: Request, page: int = 1):
 
 
 @router.get("/briefings/{briefing_id}", response_class=HTMLResponse)
-async def briefing_detail(request: Request, briefing_id: int):
-    """개별 브리핑 상세."""
+async def briefing_detail(request: Request, briefing_id: str):
+    """개별 브리핑 상세 (항목별 피드백 버튼 포함)."""
     c = _get_container(request)
     templates = _get_templates(request)
 
     briefing = await c.briefing_repo.get_by_id(briefing_id)
+    labels = {}
+    if briefing:
+        try:
+            labels = c.feedback_repo.get_for_briefing(briefing_id)
+        except Exception:
+            labels = {}
 
     return templates.TemplateResponse(
         "briefing_detail.html",
-        {"request": request, "briefing": briefing},
+        {"request": request, "briefing": briefing, "labels": labels},
     )
 
 

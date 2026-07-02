@@ -9,11 +9,11 @@ from __future__ import annotations
 from src.domain.entities import Briefing
 from src.domain.services.ai_processor import Curation
 
-CAT_ORDER = ["AI", "Semiconductor", "Cloud", "BigTech", "Startup", "Regulation", "Coding"]
+CAT_ORDER = ["AI", "Semiconductor", "Cloud", "BigTech", "Startup", "Regulation", "Coding", "Showcase"]
 CAT_LABEL = {
     "AI": "🧠 AI", "Semiconductor": "🔬 반도체", "Cloud": "☁️ 클라우드·인프라",
     "BigTech": "🏢 빅테크", "Startup": "🚀 스타트업", "Regulation": "⚖️ 규제/정책",
-    "Coding": "💻 코딩", "Other": "🗂 기타",
+    "Coding": "💻 코딩", "Showcase": "✨ 메이커·쇼케이스", "Other": "🗂 기타",
 }
 
 

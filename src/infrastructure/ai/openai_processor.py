@@ -32,6 +32,7 @@ from src.infrastructure.ai.prompts import (
     EXTRACT_CLAIMS,
     FILTER_AND_SUMMARIZE,
     SYSTEM_PROMPT,
+    TIER,
     VERIFY_CLAIMS,
 )
 from src.infrastructure.config.settings import ProcessingConfig
@@ -43,6 +44,24 @@ def _chunked(lst: list, size: int):
     """리스트를 size 크기의 청크로 분할."""
     for i in range(0, len(lst), size):
         yield lst[i : i + size]
+
+
+def _build_calibration_block(examples: list | None, per_side: int = 6) -> str:
+    """사용자 피드백(과대/과소)을 티어 판정용 few-shot 보정 텍스트로 변환."""
+    if not examples:
+        return ""
+    under = [e for e in examples if e.get("label") == "under"][:per_side]  # 더 높게
+    over = [e for e in examples if e.get("label") == "over"][:per_side]    # 더 낮게
+    if not under and not over:
+        return ""
+    lines = ["", "## 사용자 보정 예시 (과거 피드백 — 등급 판정 시 반영)"]
+    if under:
+        lines.append("아래와 비슷한 사건은 그동안 **과소평가**됐다 → 한 단계 더 높게 볼 것:")
+        lines += [f"  · {e.get('headline','')}" for e in under]
+    if over:
+        lines.append("아래와 비슷한 사건은 그동안 **과대평가**됐다 → 한 단계 더 낮게 볼 것:")
+        lines += [f"  · {e.get('headline','')}" for e in over]
+    return "\n".join(lines) + "\n"
 
 
 # catch-all 토픽 판별용 — 이런 단어가 headline에 들어있고 source_count가 많으면 잡동사니 묶음으로 간주
@@ -96,18 +115,39 @@ def _posts_to_json_lite(posts: list[Post]) -> str:
 
 
 def _parse_json_object(text: str) -> dict[str, Any]:
-    """API 응답에서 JSON 객체({...})를 추출."""
+    """API 응답에서 첫 번째 '균형 잡힌' JSON 객체({...})를 추출.
+
+    코드펜스나 JSON 뒤에 붙은 잡텍스트("Extra data")가 있어도 중괄호 깊이를
+    추적해 완결된 객체만 정확히 잘라낸다.
+    """
     text = text.strip()
-    if text.startswith("{"):
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError:
-            pass
     start = text.find("{")
-    end = text.rfind("}") + 1
-    if start == -1 or end <= start:
+    if start == -1:
         raise ValueError(f"JSON 객체를 찾을 수 없음: {text[:200]}")
-    return json.loads(text[start:end])
+
+    depth = 0
+    in_str = False
+    esc = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+        else:
+            if ch == '"':
+                in_str = True
+            elif ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    return json.loads(text[start : i + 1])
+    # 닫는 괄호를 못 찾은 경우: 마지막 }까지 시도
+    return json.loads(text[start : text.rfind("}") + 1])
 
 
 def _parse_json_response(text: str) -> list[dict[str, Any]]:
@@ -226,6 +266,44 @@ class OpenAIProcessor:
 
         logger.info(f"분류 완료: {len(results)}건")
         return results
+
+    async def judge_tiers(self, topics: list, calibration_examples: list | None = None) -> list[str]:
+        """클러스터(이벤트)별 뉴스가치 절대 등급(major/notable/minor)을 판정한다.
+
+        중요도의 '주관적 자유 점수' 대신, LLM은 이 이산 등급만 판정하고
+        실제 점수는 객관 신호(빈도·인게이지먼트)와 결합해 코드에서 계산한다.
+        calibration_examples가 주어지면(사용자 과대/과소 피드백) few-shot 보정으로 주입.
+        """
+        if not topics:
+            return []
+
+        items = [
+            {
+                "index": i,
+                "headline": t.headline,
+                "summary": " / ".join((t.body_bullets or [])[:3]),
+            }
+            for i, t in enumerate(topics)
+        ]
+        prompt = TIER.format(
+            calibration=_build_calibration_block(calibration_examples),
+            topics_json=json.dumps(items, ensure_ascii=False),
+        )
+
+        tiers = ["minor"] * len(topics)
+        try:
+            response_text = self._call_api(self._config.model_filter, prompt, max_tokens=4096)
+            parsed = _parse_json_response(response_text)
+            for it in parsed:
+                idx = it.get("index")
+                tier = (it.get("tier") or "minor").lower()
+                if isinstance(idx, int) and 0 <= idx < len(tiers) and tier in ("major", "notable", "minor"):
+                    tiers[idx] = tier
+        except Exception as e:
+            logger.warning(f"티어 판정 실패(전부 minor 처리): {e}")
+
+        logger.info(f"티어 판정: major={tiers.count('major')} notable={tiers.count('notable')} minor={tiers.count('minor')}")
+        return tiers
 
     async def verify_claims(self, posts: list[Post]) -> list[VerificationResult]:
         """게시물의 핵심 주장을 웹 검색으로 교차 검증."""
@@ -447,11 +525,15 @@ class OpenAIProcessor:
         topics_json = json.dumps(summary, ensure_ascii=False, indent=2)
         prompt = CURATION.format(audience=audience, topics_json=topics_json)
 
-        try:
-            response_text = self._call_api(self._config.model_process, prompt, max_tokens=4096)
-            data = _parse_json_object(response_text)
-        except Exception as e:
-            logger.warning(f"큐레이션 생성 실패 (audience={audience}): {e}")
+        data = None
+        for attempt in range(2):
+            try:
+                response_text = self._call_api(self._config.model_process, prompt, max_tokens=4096)
+                data = _parse_json_object(response_text)
+                break
+            except Exception as e:
+                logger.warning(f"큐레이션 생성 시도 {attempt + 1} 실패 (audience={audience}): {e}")
+        if data is None:
             return Curation(title="", paragraphs=[], kick="", categories={})
 
         overall = data.get("overall", {}) or {}

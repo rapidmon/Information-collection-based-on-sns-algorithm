@@ -21,11 +21,13 @@ CATEGORY_KO = {
     "Startup": "스타트업",
     "BigTech": "빅테크",
     "Regulation": "규제/정책",
+    "Coding": "코딩",
+    "Showcase": "메이커·쇼케이스",
     "Other": "기타",
 }
 
 # 카테고리 정렬 우선순위
-CATEGORY_ORDER = ["AI", "Semiconductor", "Cloud", "BigTech", "Startup", "Regulation", "Other"]
+CATEGORY_ORDER = ["AI", "Semiconductor", "Cloud", "BigTech", "Startup", "Regulation", "Coding", "Showcase", "Other"]
 
 
 def _importance_to_stars(score: float) -> str:
@@ -93,6 +95,8 @@ class DefaultBriefingGenerator:
                     sources_summary=", ".join(sorted(set(topic.sources))),
                     source_post_ids=topic.post_ids,
                     source_urls=topic.source_urls or [],
+                    tier=getattr(topic, "tier", "minor"),
+                    score_features=getattr(topic, "score_features", {}) or {},
                 )
             )
 

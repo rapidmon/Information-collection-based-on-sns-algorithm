@@ -26,14 +26,19 @@
                 <h2 class="text-xl font-bold" style="color: var(--text-primary);">
                     {% if briefing %}{{ briefing.title }}{% else %}최신 브리핑{% endif %}
                 </h2>
-                <button
-                    hx-post="/api/briefing/generate"
-                    hx-swap="none"
-                    class="btn-primary text-xs py-1 ml-4"
-                    onclick="alert('브리핑 생성을 시작합니다. 잠시 후 새로고침해주세요.')"
-                >
-                    수동 생성
-                </button>
+                <div class="flex items-center gap-2 ml-4 shrink-0">
+                    {% if briefing and briefing.id %}
+                    <a href="/briefings/{{ briefing.id }}" class="btn-secondary text-xs py-1 px-3">항목별 평가하기 →</a>
+                    {% endif %}
+                    <button
+                        hx-post="/api/briefing/generate"
+                        hx-swap="none"
+                        class="btn-primary text-xs py-1"
+                        onclick="alert('브리핑 생성을 시작합니다. 잠시 후 새로고침해주세요.')"
+                    >
+                        수동 생성
+                    </button>
+                </div>
             </div>
             <div class="px-6 pb-6 flex-1 overflow-y-auto">
                 {% if briefing and briefing.content_html %}

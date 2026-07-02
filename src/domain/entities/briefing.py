@@ -21,6 +21,8 @@ class BriefingItem:
     sources_summary: str = ""
     source_post_ids: list[int] = field(default_factory=list)
     source_urls: list[str] = field(default_factory=list)
+    tier: str = "minor"                              # LLM 절대 등급
+    score_features: dict = field(default_factory=dict)  # 채점 근거 스냅샷(피드백 학습용)
 
 
 @dataclass

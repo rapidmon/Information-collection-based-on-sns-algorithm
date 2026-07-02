@@ -38,20 +38,24 @@ class Orchestrator:
         for source, cfg in configs.items():
             if not cfg.enabled or source not in self._c.collectors:
                 continue
-            start_time = now + timedelta(minutes=stagger_minutes)
+            trig = self._collection_trigger(cfg.interval_minutes, stagger_minutes)
+            # 시작 직후 '너무 이른' 첫 슬롯은 건너뛴다: 한 인터벌 뒤부터의 정렬 슬롯을 첫 실행으로.
+            # (예: 13:07 시작·10분 주기 → 13:10 건너뛰고 13:20부터)
+            first_after = now + timedelta(minutes=cfg.interval_minutes)
+            first_run = trig.get_next_fire_time(None, first_after)
             self.scheduler.add_job(
                 self._run_collection,
-                trigger=IntervalTrigger(minutes=cfg.interval_minutes),
+                trigger=trig,
                 args=[source],
                 id=f"collect_{source}",
                 name=f"Collect {source}",
                 max_instances=1,
                 misfire_grace_time=1800,  # AI 처리로 루프가 막혀도 스킵 안 되게 넉넉히
-                next_run_time=start_time,
+                next_run_time=first_run,  # 시작 직후 즉시 실행 없음 — 정렬된 첫 슬롯부터
             )
             logger.info(
-                f"수집 작업 등록: {source} "
-                f"(+{stagger_minutes}분 후 시작, 매 {cfg.interval_minutes}분)"
+                f"수집 작업 등록: {source} (매 {cfg.interval_minutes}분, KST 정렬, "
+                f"첫 실행 {first_run.strftime('%H:%M') if first_run else '?'})"
             )
             stagger_minutes += 2
 
@@ -98,6 +102,32 @@ class Orchestrator:
             max_instances=1,
         )
         logger.info("자동 데이터 정리 등록: 매일 자정 (1개월 이상 데이터 삭제)")
+
+    def _collection_trigger(self, interval_minutes: int, offset: int):
+        """수집 트리거를 KST 벽시계 정각에 정렬해서 만든다 (스태거 오프셋 유지).
+
+        - interval이 60의 약수(10·30 등): 매시 [offset, offset+interval, ...]분에 실행
+          (예: 10분·offset 2 → :02,:12,:22,:32,:42,:52)
+        - interval이 60의 배수(60·120 등): **매 N시간 정각(:00)** (예: 120 → 짝수시 0·2·4…시 :00)
+          (이 소스들은 HTTP 수집이라 CDP 스태거가 필요 없어 정각으로 정렬)
+        - 그 외(60의 약수·배수 아님): 정렬 불가 → 기존 인터벌 방식 폴백
+        """
+        tz = self._tz
+        interval = interval_minutes if interval_minutes and interval_minutes > 0 else 10
+
+        if interval < 60 and 60 % interval == 0:
+            base = offset % interval
+            minutes = sorted({(base + k * interval) % 60 for k in range(60 // interval)})
+            return CronTrigger(minute=",".join(str(m) for m in minutes), timezone=tz)
+
+        if interval % 60 == 0:
+            hours = interval // 60
+            hour_spec = "*" if hours == 1 else f"*/{hours}"
+            return CronTrigger(minute=0, hour=hour_spec, timezone=tz)  # 정각(:00)
+
+        # 60의 약수/배수가 아니면 정각 정렬이 불가능 → 인터벌 유지
+        logger.warning(f"정각 정렬 불가(interval={interval}) — 인터벌 방식 유지")
+        return IntervalTrigger(minutes=interval)
 
     def start(self) -> None:
         self.scheduler.start()
@@ -148,6 +178,14 @@ class Orchestrator:
             now = datetime.now(tz=self._tz)
             period_end = now
             period_start = now - timedelta(hours=24)
+
+            # 브리핑 직전에 미처리분을 먼저 AI 처리 (밤사이 수집된 최신 뉴스가 누락되지 않도록)
+            try:
+                proc_uc = self._c.process_posts_use_case()
+                await proc_uc.execute()
+                logger.info("[scheduler] 브리핑 전 AI 처리 완료")
+            except Exception as e:
+                logger.error(f"[scheduler] 브리핑 전 AI 처리 오류: {e}")
 
             gen_uc = self._c.generate_briefing_use_case()
             briefing = await gen_uc.execute(period_start, period_end)

@@ -14,8 +14,58 @@
             | 분석: {{ briefing.total_posts_analyzed or 0 }}건 → {{ briefing.total_items or 0 }}개 항목
         </div>
     </div>
+
     <div class="p-6 flex-1 overflow-y-auto">
-        {% if briefing.content_html %}
+        {% if briefing.items %}
+        <div class="mb-3 text-sm" style="color: var(--text-muted);">
+            각 항목의 <b>중요도 점수</b>가 적절한지 평가해 주세요 —
+            <span style="color:#16a34a;">적절</span> /
+            <span style="color:#dc2626;">과대(너무 높음)</span> /
+            <span style="color:#2563eb;">과소(너무 낮음)</span>.
+            피드백은 다음 브리핑 채점 보정에 쓰입니다.
+        </div>
+
+        <div class="space-y-3">
+        {% for item in briefing.items %}
+            {% set cur = labels.get(loop.index0) %}
+            <div class="rounded-lg p-4" style="background: var(--bg-secondary, #f8f9fa); border:1px solid var(--border);">
+                <div class="flex items-start justify-between gap-3">
+                    <div class="flex-1">
+                        <div class="font-bold" style="color: var(--text-primary);">{{ item.headline }}</div>
+                        <div class="text-xs mt-1" style="color: var(--text-muted);">
+                            {{ item.category_name or 'Other' }}
+                            · 점수 {{ '%.2f'|format(item.importance_score or 0) }}
+                            {% if item.tier and item.tier != 'minor' %}· <b>{{ item.tier }}</b>{% endif %}
+                            {% if item.score_features and item.score_features.frequency %}
+                            · 출처 {{ item.score_features.frequency }} · 인게 {{ item.score_features.engagement_pct }}
+                            {% endif %}
+                        </div>
+                        {% if item.body %}
+                        <div class="text-sm mt-2 whitespace-pre-wrap" style="color: var(--text-secondary);">{{ item.body }}</div>
+                        {% endif %}
+                    </div>
+                    <div class="flex gap-1 shrink-0 fb-group" data-idx="{{ loop.index0 }}">
+                        <button type="button" class="fb-btn" data-label="appropriate"
+                            style="{{ 'background:#16a34a;color:#fff;' if cur=='appropriate' else '' }}"
+                            onclick="sendFeedback(this,'appropriate')">적절</button>
+                        <button type="button" class="fb-btn" data-label="over"
+                            style="{{ 'background:#dc2626;color:#fff;' if cur=='over' else '' }}"
+                            onclick="sendFeedback(this,'over')">과대</button>
+                        <button type="button" class="fb-btn" data-label="under"
+                            style="{{ 'background:#2563eb;color:#fff;' if cur=='under' else '' }}"
+                            onclick="sendFeedback(this,'under')">과소</button>
+                    </div>
+                </div>
+            </div>
+        {% endfor %}
+        </div>
+
+        <details class="mt-6">
+            <summary class="text-sm cursor-pointer" style="color: var(--text-muted);">전체 브리핑 미리보기 (이메일 형식)</summary>
+            <div class="mt-3 briefing-content">{{ briefing.content_html | safe }}</div>
+        </details>
+
+        {% elif briefing.content_html %}
             <div class="briefing-content">{{ briefing.content_html | safe }}</div>
         {% elif briefing.content_text %}
             <pre class="whitespace-pre-wrap text-sm leading-relaxed" style="font-family: inherit; color: var(--text-secondary);">{{ briefing.content_text }}</pre>
@@ -24,6 +74,38 @@
         {% endif %}
     </div>
 </div>
+
+<style>
+.fb-btn {
+    font-size: 12px; padding: 4px 10px; border-radius: 6px;
+    border: 1px solid var(--border); background: transparent;
+    color: var(--text-secondary); cursor: pointer; transition: all .15s;
+}
+.fb-btn:hover { border-color: var(--accent); }
+</style>
+
+<script>
+const BRIEFING_ID = "{{ briefing.id }}";
+async function sendFeedback(btn, label) {
+    const group = btn.closest('.fb-group');
+    const idx = parseInt(group.dataset.idx, 10);
+    const colors = {appropriate:'#16a34a', over:'#dc2626', under:'#2563eb'};
+    // 낙관적 UI: 그룹 초기화 후 선택 강조
+    group.querySelectorAll('.fb-btn').forEach(b => { b.style.background=''; b.style.color=''; });
+    btn.style.background = colors[label]; btn.style.color = '#fff';
+    try {
+        const res = await fetch('/api/feedback', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({briefing_id: BRIEFING_ID, item_index: idx, label: label})
+        });
+        if (!res.ok) throw new Error(await res.text());
+    } catch (e) {
+        btn.style.background = ''; btn.style.color = '';
+        alert('저장 실패: ' + e.message);
+    }
+}
+</script>
+
 {% else %}
 <div class="mt-4 card p-8 text-center" style="color: var(--text-muted);">
     브리핑을 찾을 수 없습니다.

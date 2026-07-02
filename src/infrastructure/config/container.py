@@ -18,12 +18,14 @@ from src.infrastructure.collectors.dcinside_collector import DCInsideCollector
 from src.infrastructure.collectors.kr36_collector import Kr36Collector
 from src.infrastructure.collectors.linkedin_collector import LinkedInCollector
 from src.infrastructure.collectors.post_liker import CdpPostLiker
+from src.infrastructure.collectors.producthunt_collector import ProductHuntCollector
 from src.infrastructure.collectors.threads_collector import ThreadsCollector
 from src.infrastructure.collectors.twitter_collector import TwitterCollector
 from src.infrastructure.config.settings import AppConfig, Settings, SnsCredentials
 from src.infrastructure.database.repositories.briefing_repo import FirestoreBriefingRepository
 from src.infrastructure.database.repositories.category_repo_memory import MemoryCategoryRepository
 from src.infrastructure.database.repositories.collection_run_repo_sqlite import SQLiteCollectionRunRepository
+from src.infrastructure.database.repositories.feedback_repo_sqlite import FeedbackRepositorySQLite
 from src.infrastructure.database.repositories.post_repo_sqlite import PostRepositorySQLite
 from src.infrastructure.delivery.briefing_builder import DefaultBriefingGenerator
 from src.infrastructure.delivery.email_sender import EmailNotifier
@@ -44,6 +46,7 @@ class Container:
         # ─── Repositories ───
         self.post_repo = PostRepositorySQLite()
         self.briefing_repo = FirestoreBriefingRepository(firestore_db)  # 브리핑만 Firestore
+        self.feedback_repo = FeedbackRepositorySQLite()  # 항목 피드백(적절/과대/과소)
         self.category_repo = MemoryCategoryRepository(
             [Category(name=c.name, name_ko=c.name_ko, color=c.color) for c in app_config.categories]
         )
@@ -84,6 +87,9 @@ class Container:
 
         if "36kr" in collector_configs and collector_configs["36kr"].enabled:
             self.collectors["36kr"] = Kr36Collector(collector_configs["36kr"])
+
+        if "producthunt" in collector_configs and collector_configs["producthunt"].enabled:
+            self.collectors["producthunt"] = ProductHuntCollector(collector_configs["producthunt"])
 
         # SNS 수집기 — 모두 CDP 기반 (사용자의 Chrome에 연결)
         if "twitter" in collector_configs and collector_configs["twitter"].enabled:
@@ -143,6 +149,8 @@ class Container:
             ai_processor=self.ai_processor,
             briefing_generator=self.briefing_generator,
             processing_config=self.config.processing,
+            scoring_config=self.config.scoring,
+            feedback_repo=self.feedback_repo,
         )
 
     def send_briefing_use_case(self) -> SendBriefingUseCase:

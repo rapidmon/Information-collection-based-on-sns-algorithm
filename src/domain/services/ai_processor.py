@@ -38,10 +38,14 @@ class MergedTopic:
     importance_score: float
     sources: list[str]
     source_urls: list[str] = None
+    tier: str = "minor"          # LLM 절대 등급: major/notable/minor (중요도 보정용)
+    score_features: dict = None  # 채점 근거 스냅샷(빈도·인게이지먼트·티어·부분점수)
 
     def __post_init__(self):
         if self.source_urls is None:
             self.source_urls = []
+        if self.score_features is None:
+            self.score_features = {}
 
 
 @dataclass
@@ -74,6 +78,15 @@ class AIProcessor(Protocol):
 
     async def verify_claims(self, posts: list[Post]) -> list[VerificationResult]:
         """게시물의 핵심 주장을 웹 검색으로 교차 검증."""
+        ...
+
+    async def judge_tiers(
+        self, topics: list["MergedTopic"], calibration_examples: list | None = None
+    ) -> list[str]:
+        """클러스터(이벤트)별 뉴스가치 절대 등급(major/notable/minor) 판정.
+
+        calibration_examples: 사용자 과대/과소 피드백(few-shot 보정용, 선택).
+        """
         ...
 
     async def deduplicate_and_merge(self, posts: list[Post]) -> list[MergedTopic]:

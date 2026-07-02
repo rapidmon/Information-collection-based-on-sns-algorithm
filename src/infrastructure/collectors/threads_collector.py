@@ -14,7 +14,7 @@ from typing import Any, Optional
 
 from src.domain.entities import Post
 from src.domain.exceptions import SessionExpiredError
-from src.infrastructure.collectors.cdp import auto_login, cdp_connection, check_session, minimize_window
+from src.infrastructure.collectors.cdp import auto_login, cdp_connection, check_session, get_or_create_page, minimize_window
 from src.infrastructure.config.settings import CollectorConfig, SnsCredentials
 
 logger = logging.getLogger(__name__)
@@ -69,7 +69,7 @@ class ThreadsCollector:
     async def collect(self) -> list[Post]:
         """GraphQL 인터셉트 + DOM 파싱 하이브리드 방식으로 수집."""
         async with cdp_connection(self._cdp_url, "threads") as (pw, context):
-            page = await context.new_page()
+            page = await get_or_create_page(context, "threads")  # 기존 Threads 탭 재사용
             await minimize_window(page)
             captured_data: list[dict[str, Any]] = []
 
@@ -111,7 +111,11 @@ class ThreadsCollector:
                 return posts
 
             finally:
-                await page.close()
+                # 탭은 닫지 않고 재사용 — 리스너만 정리
+                try:
+                    page.remove_listener("response", on_response)
+                except Exception:
+                    pass
 
     # ─── GraphQL 파싱 ───
 

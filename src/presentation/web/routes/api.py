@@ -222,6 +222,45 @@ async def get_briefing(request: Request, briefing_id: str):
         return JSONResponse(status_code=500, content={"error": "브리핑 조회 실패"})
 
 
+@router.post("/feedback")
+async def submit_feedback(request: Request):
+    """브리핑 항목 피드백 저장 (적절/과대/과소).
+
+    body: {briefing_id, item_index, label}. 서버가 해당 항목의 헤드라인·점수·
+    피처 스냅샷을 브리핑에서 조회해 라벨과 함께 저장한다(캘리브레이션 재료).
+    """
+    from src.infrastructure.database.repositories.feedback_repo_sqlite import VALID_LABELS
+
+    c = _get_container(request)
+    try:
+        body = await request.json()
+        briefing_id = body.get("briefing_id")
+        item_index = body.get("item_index")
+        label = body.get("label")
+
+        if not briefing_id or item_index is None or label not in VALID_LABELS:
+            return JSONResponse(status_code=400, content={"error": "briefing_id/item_index/label 필요"})
+
+        b = await c.briefing_repo.get_by_id(str(briefing_id))
+        if not b or item_index < 0 or item_index >= len(b.items):
+            return JSONResponse(status_code=404, content={"error": "항목을 찾을 수 없음"})
+
+        it = b.items[item_index]
+        c.feedback_repo.upsert(
+            briefing_id=str(briefing_id),
+            item_index=int(item_index),
+            headline=it.headline,
+            category=it.category_name,
+            importance_score=it.importance_score,
+            tier=getattr(it, "tier", "minor"),
+            features=getattr(it, "score_features", {}) or {},
+            label=label,
+        )
+        return {"ok": True, "label": label, "total_feedback": c.feedback_repo.count()}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
 @router.get("/keywords/top")
 async def top_keywords(request: Request, limit: int = 20, days: int = 2):
     """최근 N일간 자주 언급된 키워드 top K."""
