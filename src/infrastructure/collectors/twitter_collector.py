@@ -41,8 +41,12 @@ class TwitterCollector:
         return "twitter"
 
     async def is_session_valid(self) -> bool:
+        # 로그인 시 /home에 머물고, 로그아웃 시 x.com/ 랜딩이나 로그인 플로우로 튕긴다.
         return await check_session(
-            self._cdp_url, "twitter", self.FEED_URL, ["login", "flow"]
+            self._cdp_url, "twitter", self.FEED_URL, ["login", "flow"],
+            match="x.com",
+            require_substr="/home",
+            login_markers='[data-testid="loginButton"], a[href*="/i/flow/login"], a[href="/login"]',
         )
 
     async def login(self) -> bool:

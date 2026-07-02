@@ -100,17 +100,44 @@ async def minimize_window(page: Page) -> None:
 
 
 async def check_session(
-    cdp_url: str, source_name: str, feed_url: str, invalid_keywords: list[str]
+    cdp_url: str,
+    source_name: str,
+    feed_url: str,
+    invalid_keywords: list[str],
+    match: str | None = None,
+    require_substr: str | None = None,
+    login_markers: str | None = None,
 ) -> bool:
-    """CDP 연결 후 피드 URL로 이동하여 로그인 상태를 확인한다."""
+    """피드로 이동해 로그인 상태를 확인한다.
+
+    아래 중 하나라도 걸리면 '로그아웃(무효)'으로 판정한다:
+      (a) 최종 url에 invalid_keywords 포함 (login/authwall 등)
+      (b) require_substr가 지정됐는데 최종 url에 없음
+          (예: X는 로그인 시 /home에 머물고, 로그아웃 시 x.com/ 로 튕긴다)
+      (c) login_markers 셀렉터(로그인/가입 버튼·입력창)가 페이지에 존재
+    URL 키워드만으론 SNS 로그아웃을 놓치는 경우가 많아 (b)(c)를 추가했다.
+    """
     try:
         async with cdp_connection(cdp_url, source_name) as (pw, context):
-            page = await context.new_page()
-            try:
-                await page.goto(feed_url, wait_until="domcontentloaded", timeout=15000)
-                return not any(kw in page.url for kw in invalid_keywords)
-            finally:
-                await page.close()
+            page = await get_or_create_page(context, match)
+            await minimize_window(page)
+            await page.goto(feed_url, wait_until="domcontentloaded", timeout=15000)
+            await page.wait_for_timeout(1500)
+            url = page.url or ""
+
+            if any(kw in url for kw in invalid_keywords):
+                return False
+            if require_substr and require_substr not in url:
+                logger.info(f"[{source_name}] 세션 무효: url에 '{require_substr}' 없음 ({url[:60]})")
+                return False
+            if login_markers:
+                try:
+                    if await page.query_selector(login_markers):
+                        logger.info(f"[{source_name}] 세션 무효: 로그인 화면 감지")
+                        return False
+                except Exception:
+                    pass
+            return True
     except Exception as e:
         logger.warning(f"[{source_name}] 세션 확인 실패: {e}")
         return False

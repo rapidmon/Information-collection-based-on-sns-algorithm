@@ -41,8 +41,12 @@ class ThreadsCollector:
         return "threads"
 
     async def is_session_valid(self) -> bool:
+        # Threads 피드는 로그인/로그아웃 모두 루트 URL이라 URL만으론 구분 불가 →
+        # 로그인 화면 마커(로그인 링크·아이디 입력창)로 로그아웃을 감지.
         return await check_session(
-            self._cdp_url, "threads", self.FEED_URL, ["login"]
+            self._cdp_url, "threads", self.FEED_URL, ["login"],
+            match="threads",
+            login_markers='a[href*="/login"], input[autocomplete="username"], input[name="username"]',
         )
 
     async def login(self) -> bool:

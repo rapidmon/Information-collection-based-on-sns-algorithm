@@ -45,6 +45,7 @@ class LinkedInCollector:
         return await check_session(
             self._cdp_url, "linkedin", self.FEED_URL,
             ["login", "authwall", "checkpoint"],
+            match="linkedin.com",
         )
 
     async def login(self) -> bool:
