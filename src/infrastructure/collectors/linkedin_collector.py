@@ -75,7 +75,12 @@ class LinkedInCollector:
             await minimize_window(page)
 
             try:
-                await page.goto(self.FEED_URL, wait_until="domcontentloaded", timeout=60000)
+                # 재사용 탭이 이미 피드면 reload로 최신 글을 받고, 개별 게시물 페이지 등이면 goto.
+                cur = page.url or ""
+                if "linkedin.com/feed" in cur and "/update/" not in cur:
+                    await page.reload(wait_until="domcontentloaded", timeout=60000)
+                else:
+                    await page.goto(self.FEED_URL, wait_until="domcontentloaded", timeout=60000)
 
                 if any(kw in page.url for kw in ["login", "authwall", "checkpoint", "security"]):
                     raise SessionExpiredError("linkedin — Chrome에서 LinkedIn에 로그인 해주세요")

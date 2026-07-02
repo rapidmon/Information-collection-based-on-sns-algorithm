@@ -108,7 +108,14 @@ class TwitterCollector:
             page.on("response", on_response)
 
             try:
-                await page.goto(self.FEED_URL, wait_until="domcontentloaded", timeout=60000)
+                # 재사용 탭이 이미 피드(SPA)에 있으면 goto가 no-op이라 타임라인 GraphQL이
+                # 재요청되지 않는다 → 이미 피드면 강제 reload, 아니면 goto로 진입.
+                cur = page.url or ""
+                on_feed = cur.rstrip("/").endswith("/home")
+                if on_feed:
+                    await page.reload(wait_until="domcontentloaded", timeout=60000)
+                else:
+                    await page.goto(self.FEED_URL, wait_until="domcontentloaded", timeout=60000)
                 await page.wait_for_timeout(3000)  # 타임라인 API 응답 대기
 
                 if "login" in page.url or "flow" in page.url:

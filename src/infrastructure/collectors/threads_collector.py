@@ -87,7 +87,13 @@ class ThreadsCollector:
             page.on("response", on_response)
 
             try:
-                await page.goto(self.FEED_URL, wait_until="networkidle", timeout=30000)
+                # 재사용 탭이 이미 피드(SPA)면 goto가 no-op → GraphQL 재요청 안 됨.
+                # 피드면 강제 reload, 개별 게시물 페이지 등이면 피드로 goto.
+                cur = page.url or ""
+                if "threads." in cur and "/post/" not in cur:
+                    await page.reload(wait_until="networkidle", timeout=30000)
+                else:
+                    await page.goto(self.FEED_URL, wait_until="networkidle", timeout=30000)
 
                 if "login" in page.url:
                     raise SessionExpiredError("threads — Chrome에서 Threads에 로그인 해주세요")
