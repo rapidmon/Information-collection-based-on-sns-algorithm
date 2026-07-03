@@ -91,19 +91,20 @@ class CdpPostLiker:
         done: list[str] = []
         try:
             async with cdp_connection(self._cdp_url, source) as (pw, context):
-                domain = {"twitter": "x.com", "threads": "threads", "linkedin": "linkedin.com"}.get(source)
-                page = await get_or_create_page(context, domain)  # 기존 플랫폼 탭 재사용
+                page = await context.new_page()  # 매번 새 탭 (완료 후 닫아 메모리 회수)
                 await minimize_window(page)
-                for post in posts:
-                    if len(done) >= self._cfg.max_per_run:
-                        break
-                    if await self._like_one(page, source, post):
-                        done.append(post.id)
-                        if not self._cfg.dry_run:
-                            await asyncio.sleep(
-                                random.uniform(self._cfg.delay_min, self._cfg.delay_max)
-                            )
-                # 탭은 닫지 않고 남겨 다음 사이클에 재사용
+                try:
+                    for post in posts:
+                        if len(done) >= self._cfg.max_per_run:
+                            break
+                        if await self._like_one(page, source, post):
+                            done.append(post.id)
+                            if not self._cfg.dry_run:
+                                await asyncio.sleep(
+                                    random.uniform(self._cfg.delay_min, self._cfg.delay_max)
+                                )
+                finally:
+                    await page.close()
         except Exception as e:
             logger.error(f"[{source}][like] 연결/처리 오류: {e}")
 

@@ -72,16 +72,11 @@ class LinkedInCollector:
     async def collect(self) -> list[Post]:
         """DOM 파싱으로 LinkedIn 피드를 수집."""
         async with cdp_connection(self._cdp_url, "linkedin") as (pw, context):
-            page = await get_or_create_page(context, "linkedin.com")  # 기존 LinkedIn 탭 재사용
+            page = await context.new_page()  # 매 사이클 새 탭 (수집 후 닫아 메모리 회수)
             await minimize_window(page)
 
             try:
-                # 재사용 탭이 이미 피드면 reload로 최신 글을 받고, 개별 게시물 페이지 등이면 goto.
-                cur = page.url or ""
-                if "linkedin.com/feed" in cur and "/update/" not in cur:
-                    await page.reload(wait_until="domcontentloaded", timeout=60000)
-                else:
-                    await page.goto(self.FEED_URL, wait_until="domcontentloaded", timeout=60000)
+                await page.goto(self.FEED_URL, wait_until="domcontentloaded", timeout=60000)
 
                 if any(kw in page.url for kw in ["login", "authwall", "checkpoint", "security"]):
                     raise SessionExpiredError("linkedin — Chrome에서 LinkedIn에 로그인 해주세요")
@@ -117,7 +112,7 @@ class LinkedInCollector:
                 return posts
 
             finally:
-                pass  # 탭을 닫지 않고 남겨 다음 수집에 재사용
+                await page.close()  # 탭 닫아 렌더러 메모리 회수 (누수·먹통 방지)
 
     async def _get_feed_items(self, page) -> list:
         """피드에서 실제 게시물 항목만 추출한다."""

@@ -96,7 +96,7 @@ class TwitterCollector:
     async def collect(self) -> list[Post]:
         """Chrome CDP로 연결하여 GraphQL 인터셉트 방식으로 타임라인을 수집한다."""
         async with cdp_connection(self._cdp_url, "twitter") as (pw, context):
-            page = await get_or_create_page(context, "x.com")  # 기존 x.com 탭 재사용
+            page = await context.new_page()  # 매 사이클 새 탭 (수집 후 닫아 메모리 회수)
             await minimize_window(page)
             captured: list[dict[str, Any]] = []
 
@@ -112,14 +112,7 @@ class TwitterCollector:
             page.on("response", on_response)
 
             try:
-                # 재사용 탭이 이미 피드(SPA)에 있으면 goto가 no-op이라 타임라인 GraphQL이
-                # 재요청되지 않는다 → 이미 피드면 강제 reload, 아니면 goto로 진입.
-                cur = page.url or ""
-                on_feed = cur.rstrip("/").endswith("/home")
-                if on_feed:
-                    await page.reload(wait_until="domcontentloaded", timeout=60000)
-                else:
-                    await page.goto(self.FEED_URL, wait_until="domcontentloaded", timeout=60000)
+                await page.goto(self.FEED_URL, wait_until="domcontentloaded", timeout=60000)
                 await page.wait_for_timeout(3000)  # 타임라인 API 응답 대기
 
                 # 로그인 상태 확인: 로그인돼 있으면 /home에 머문다. 로그아웃 시 X는
@@ -138,11 +131,7 @@ class TwitterCollector:
                 return posts
 
             finally:
-                # 탭은 닫지 않고 재사용 — 리스너만 정리
-                try:
-                    page.remove_listener("response", on_response)
-                except Exception:
-                    pass
+                await page.close()  # 탭 닫아 렌더러 메모리 회수 (누수·먹통 방지)
 
     # ─── GraphQL 파싱 ───
 

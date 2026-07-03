@@ -73,7 +73,7 @@ class ThreadsCollector:
     async def collect(self) -> list[Post]:
         """GraphQL 인터셉트 + DOM 파싱 하이브리드 방식으로 수집."""
         async with cdp_connection(self._cdp_url, "threads") as (pw, context):
-            page = await get_or_create_page(context, "threads")  # 기존 Threads 탭 재사용
+            page = await context.new_page()  # 매 사이클 새 탭 (수집 후 닫아 메모리 회수)
             await minimize_window(page)
             captured_data: list[dict[str, Any]] = []
 
@@ -91,13 +91,7 @@ class ThreadsCollector:
             page.on("response", on_response)
 
             try:
-                # 재사용 탭이 이미 피드(SPA)면 goto가 no-op → GraphQL 재요청 안 됨.
-                # 피드면 강제 reload, 개별 게시물 페이지 등이면 피드로 goto.
-                cur = page.url or ""
-                if "threads." in cur and "/post/" not in cur:
-                    await page.reload(wait_until="networkidle", timeout=30000)
-                else:
-                    await page.goto(self.FEED_URL, wait_until="networkidle", timeout=30000)
+                await page.goto(self.FEED_URL, wait_until="networkidle", timeout=30000)
 
                 if "login" in page.url:
                     raise SessionExpiredError("threads — Chrome에서 Threads에 로그인 해주세요")
@@ -121,11 +115,7 @@ class ThreadsCollector:
                 return posts
 
             finally:
-                # 탭은 닫지 않고 재사용 — 리스너만 정리
-                try:
-                    page.remove_listener("response", on_response)
-                except Exception:
-                    pass
+                await page.close()  # 탭 닫아 렌더러 메모리 회수 (누수·먹통 방지)
 
     # ─── GraphQL 파싱 ───
 
