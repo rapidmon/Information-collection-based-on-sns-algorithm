@@ -14,18 +14,13 @@ import logging
 import re
 from datetime import datetime, timedelta
 
-import httpx
-
 from src.domain.entities import Post
+from src.infrastructure.collectors.http import fetch_text
 from src.infrastructure.config.settings import CollectorConfig
 
 logger = logging.getLogger(__name__)
 
 NEWSFLASH_URL = "https://36kr.com/newsflashes"
-_UA = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/120.0 Safari/537.36"
-)
 _STATE_RE = re.compile(r"window\.initialState\s*=\s*(\{.*)", re.S)
 
 
@@ -43,17 +38,10 @@ class Kr36Collector:
         return True  # 공개 사이트 — 로그인 불필요
 
     async def collect(self) -> list[Post]:
-        try:
-            async with httpx.AsyncClient(
-                timeout=20.0,
-                follow_redirects=True,
-                headers={"User-Agent": _UA, "Accept-Language": "zh-CN,zh;q=0.9"},
-            ) as client:
-                resp = await client.get(NEWSFLASH_URL)
-                resp.raise_for_status()
-                html = resp.text
-        except Exception as e:
-            logger.error(f"[36kr] 페이지 요청 실패: {e}")
+        html = await fetch_text(
+            NEWSFLASH_URL, "36kr", extra_headers={"Accept-Language": "zh-CN,zh;q=0.9"}
+        )
+        if html is None:
             return []
 
         items = self._extract_items(html)

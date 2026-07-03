@@ -12,18 +12,13 @@ import logging
 import re
 from datetime import datetime, timezone
 
-import httpx
-
 from src.domain.entities import Post
+from src.infrastructure.collectors.http import fetch_text
 from src.infrastructure.config.settings import CollectorConfig
 
 logger = logging.getLogger(__name__)
 
 FEED_URL = "https://www.producthunt.com/feed?category=artificial-intelligence"
-_UA = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/120.0 Safari/537.36"
-)
 _ENTRY = re.compile(r"<entry>(.*?)</entry>", re.S)
 _TAG = re.compile(r"<[^>]+>")
 
@@ -47,15 +42,8 @@ class ProductHuntCollector:
         return True
 
     async def collect(self) -> list[Post]:
-        try:
-            async with httpx.AsyncClient(
-                timeout=20.0, follow_redirects=True, headers={"User-Agent": _UA}
-            ) as client:
-                resp = await client.get(FEED_URL)
-                resp.raise_for_status()
-                xml = resp.text
-        except Exception as e:
-            logger.error(f"[producthunt] 요청 실패: {e}")
+        xml = await fetch_text(FEED_URL, "producthunt")
+        if xml is None:
             return []
 
         seen: set[str] = set()
