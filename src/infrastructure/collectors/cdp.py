@@ -6,12 +6,82 @@
 from __future__ import annotations
 
 import logging
+import time
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
 from playwright.async_api import BrowserContext, Page, Playwright, async_playwright
 
 logger = logging.getLogger(__name__)
+
+# ─── 먹통 Chrome 안전 복구 상태 ───
+# 예전의 무한 taskkill+재실행(창 증식) 대신, '먹통(Timeout)일 때만' 쿨다운을 두고
+# 1회만, 세션복원 없이, 디버그 Chrome만 재시작한다.
+_CHROME_PATH = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
+_RESTART_COOLDOWN_S = 600  # 안전 재시작 최소 간격(초) — 스파이럴 방지
+_last_restart_monotonic = 0.0
+
+
+def _detect_debug_chrome() -> tuple[list[str], str]:
+    """--remote-debugging-port를 가진 Chrome의 (PID 목록, user-data-dir)를 반환."""
+    import subprocess
+
+    pids: list[str] = []
+    user_dir = r"C:\chrome_temp"
+    try:
+        r = subprocess.run(
+            ["wmic", "process", "where",
+             "name='chrome.exe' and commandline like '%remote-debugging-port%'",
+             "get", "processid,commandline"],
+            capture_output=True, text=True, timeout=6,
+        )
+        for line in r.stdout.splitlines():
+            line = line.strip()
+            if not line or line.lower().startswith("commandline"):
+                continue
+            if "--user-data-dir=" in line:
+                for part in line.split():
+                    if part.startswith("--user-data-dir="):
+                        user_dir = part.split("=", 1)[1].strip('"')
+            toks = line.split()
+            if toks and toks[-1].isdigit():
+                pids.append(toks[-1])
+    except Exception:
+        pass
+    return pids, user_dir
+
+
+def _safe_restart_chrome(source_name: str) -> None:
+    """먹통인 디버그 Chrome만 종료하고 세션복원 없이 최소 상태로 재실행.
+
+    --restore-last-session 미사용(탭/창 증식 없음), 디버그 포트를 가진 Chrome만
+    프로세스 트리로 종료(일반 Chrome은 건드리지 않음). 쿨다운은 호출부에서 관리.
+    """
+    import subprocess
+
+    pids, user_dir = _detect_debug_chrome()
+    for pid in pids:
+        try:
+            subprocess.run(["taskkill", "/F", "/T", "/PID", pid], capture_output=True, timeout=6)
+        except Exception:
+            pass
+    try:
+        subprocess.Popen([
+            _CHROME_PATH,
+            "--remote-debugging-port=9222",
+            f"--user-data-dir={user_dir}",
+            "--start-minimized",
+            "--disable-backgrounding-occluded-windows",
+            "--disable-background-timer-throttling",
+            "--disable-renderer-backgrounding",
+            "--disable-extensions",
+            "--disable-features=Translate,MediaRouter",
+            "--disable-background-networking",
+            "--js-flags=--max-old-space-size=2048",
+        ])
+        logger.warning(f"[{source_name}] 디버그 Chrome 안전 재시작 완료 (종료 {len(pids)}개, 세션복원 없음)")
+    except Exception as e:
+        logger.error(f"[{source_name}] Chrome 안전 재실행 실패: {e}")
 
 
 @asynccontextmanager
@@ -28,6 +98,8 @@ async def cdp_connection(
     """
     import asyncio
 
+    global _last_restart_monotonic
+
     pw = await async_playwright().start()
     browser = None
     last_err: Exception | None = None
@@ -39,6 +111,24 @@ async def cdp_connection(
             last_err = e
             if attempt < 2:
                 await asyncio.sleep(2)
+
+    # 여전히 실패하면: 먹통(Timeout)/포트닫힘(ECONNREFUSED)일 때 '안전 재시작'을 쿨다운 내 1회 시도.
+    if browser is None:
+        msg = str(last_err or "")
+        recoverable = ("Timeout" in msg) or ("ECONNREFUSED" in msg)
+        now = time.monotonic()
+        if recoverable and (now - _last_restart_monotonic) > _RESTART_COOLDOWN_S:
+            _last_restart_monotonic = now
+            logger.warning(
+                f"[{source_name}] Chrome 응답 없음 — 안전 재시작 시도 "
+                f"(쿨다운 {_RESTART_COOLDOWN_S // 60}분, 세션복원 없음)"
+            )
+            _safe_restart_chrome(source_name)
+            await asyncio.sleep(6)
+            try:
+                browser = await pw.chromium.connect_over_cdp(cdp_url, timeout=15000)
+            except Exception as e:
+                last_err = e
 
     if browser is None:
         await pw.stop()
