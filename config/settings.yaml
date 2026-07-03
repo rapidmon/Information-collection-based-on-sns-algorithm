@@ -98,7 +98,7 @@ like:
   platforms: ["twitter", "threads", "linkedin"]
 
 briefing:
-  daily_time: "09:00"
+  daily_time: "08:00"
   max_items: 50
   include_stats: true
   min_importance: 0.5       # 정규화(최고=1.0) 점수 하한 — 그날 최고 대비 50% 미만 항목 제거
