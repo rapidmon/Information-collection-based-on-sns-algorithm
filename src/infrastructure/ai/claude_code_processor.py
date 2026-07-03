@@ -27,7 +27,7 @@ import tempfile
 
 from src.domain.services.ai_processor import VerificationResult
 from src.infrastructure.ai.openai_processor import (
-    OpenAIProcessor,
+    BaseLLMProcessor,
     _parse_json_response,
     _posts_to_json_lite,
 )
@@ -58,12 +58,12 @@ def _resolve_claude_bin() -> str:
     return shutil.which("claude") or shutil.which("claude.cmd") or "claude"
 
 
-class ClaudeCodeProcessor(OpenAIProcessor):
+class ClaudeCodeProcessor(BaseLLMProcessor):
     """Claude Code CLI(`claude -p`)를 LLM 백엔드로 쓰는 AI 프로세서.
 
-    OpenAIProcessor를 상속해 4개 처리 메서드와 병합/웹검색 로직을 재사용하고,
-    LLM 호출부(_call_api)만 오버라이드한다. OpenAI 클라이언트는 만들지 않으므로
-    OpenAI API 키가 없어도 동작한다.
+    BaseLLMProcessor(공용 파이프라인)를 상속해 필터/분류/티어/병합/큐레이션을
+    재사용하고, LLM 호출부(_call_api)와 웹검증(verify_claims)만 Claude용으로 구현한다.
+    OpenAI 클라이언트/키가 필요 없다.
     """
 
     def __init__(

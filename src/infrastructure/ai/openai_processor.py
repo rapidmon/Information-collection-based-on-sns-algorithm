@@ -161,33 +161,19 @@ def _parse_json_response(text: str) -> list[dict[str, Any]]:
     return json.loads(_extract_balanced_json(text, "[", "]"))
 
 
-class OpenAIProcessor:
-    """OpenAI GPT API 기반 AI 프로세서."""
+class BaseLLMProcessor:
+    """LLM 백엔드 공용 처리 파이프라인.
 
-    # 상태 없는 순수 병합 로직 — 클래스 속성으로 공유(ClaudeCodeProcessor 서브클래스 포함)
+    필터/요약·분류·티어·중복제거/통합·큐레이션 등 백엔드에 무관한 로직을 담는다.
+    실제 LLM 호출(_call_api)과 신뢰도 검증(verify_claims)만 서브클래스가 구현/오버라이드한다.
+    """
+
+    # 상태 없는 순수 병합 로직 — 클래스 속성으로 공유(서브클래스 포함)
     _merger = TopicMerger()
 
-    def __init__(self, api_key: str, config: ProcessingConfig):
-        self._client = OpenAI(api_key=api_key)
-        self._config = config
-
     def _call_api(self, model: str, prompt: str, max_tokens: int = 4096) -> str:
-        """OpenAI Chat Completions API 동기 호출."""
-        is_legacy = "gpt-4o" in model
-        params: dict = {
-            "model": model,
-            "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": prompt},
-            ],
-        }
-        if is_legacy:
-            params["max_tokens"] = max_tokens
-            params["temperature"] = 0.1
-        else:
-            params["max_completion_tokens"] = max_tokens
-        response = self._client.chat.completions.create(**params)
-        return response.choices[0].message.content or ""
+        """LLM 호출. 백엔드별 서브클래스(OpenAIProcessor/ClaudeCodeProcessor)가 구현한다."""
+        raise NotImplementedError
 
     async def filter_and_summarize(self, posts: list[Post]) -> list[FilterResult]:
         """관련성 필터 + 요약 (GPT-4o-mini 사용, 배치)."""
@@ -298,122 +284,6 @@ class OpenAIProcessor:
 
         logger.info(f"티어 판정: major={tiers.count('major')} notable={tiers.count('notable')} minor={tiers.count('minor')}")
         return tiers
-
-    async def verify_claims(self, posts: list[Post]) -> list[VerificationResult]:
-        """게시물의 핵심 주장을 웹 검색으로 교차 검증."""
-        if not posts:
-            return []
-
-        # 1단계: GPT로 검증이 필요한 핵심 주장 추출
-        posts_json = _posts_to_json_lite(posts)
-        prompt = EXTRACT_CLAIMS.format(posts_json=posts_json)
-
-        try:
-            response_text = self._call_api(self._config.model_filter, prompt)
-            claims = _parse_json_response(response_text)
-        except Exception as e:
-            logger.warning(f"주장 추출 실패 (검증 스킵): {e}")
-            return [
-                VerificationResult(post_id=p.id, credibility="verified")
-                for p in posts
-            ]
-
-        # 검증 필요한 주장만 필터
-        claims_to_verify = [
-            c for c in claims
-            if c.get("needs_verification") and c.get("claim") and c.get("post_id")
-        ]
-
-        if not claims_to_verify:
-            logger.info("검증 필요한 주장 없음, 전체 통과")
-            return [
-                VerificationResult(post_id=p.id, credibility="verified")
-                for p in posts
-            ]
-
-        # 2단계: 웹 검색으로 각 주장 검증
-        # 검색이 '실패'(rate limit 등)한 주장은 검증 대상에서 제외한다.
-        # (검색 인프라 장애로 정상 뉴스를 스캠으로 오판해 떨어뜨리는 것을 방지)
-        verification_data = []
-        search_failed = 0
-        for claim_item in claims_to_verify:
-            search_results = self._web_search(claim_item["claim"])
-            if search_results is None:
-                search_failed += 1
-                continue
-            verification_data.append({
-                "post_id": claim_item["post_id"],
-                "claim": claim_item["claim"],
-                "search_results": search_results,
-            })
-
-        if search_failed:
-            logger.warning(
-                f"웹 검색 실패 {search_failed}건 — 해당 게시물은 검증 스킵(통과 처리)"
-            )
-
-        # 검증 가능한 주장이 하나도 없으면(전부 검색 실패) 전체 통과
-        if not verification_data:
-            logger.info("검색 가능한 주장 없음(검색 실패) — 전체 통과")
-            return [
-                VerificationResult(post_id=p.id, credibility="verified")
-                for p in posts
-            ]
-
-        # 3단계: GPT로 원문 vs 검색 결과 비교 판정
-        verification_json = json.dumps(verification_data, ensure_ascii=False, indent=2)
-        verify_prompt = VERIFY_CLAIMS.format(verification_data=verification_json)
-
-        results: list[VerificationResult] = []
-        verified_ids: set = set()
-
-        try:
-            response_text = self._call_api(self._config.model_filter, verify_prompt)
-            parsed = _parse_json_response(response_text)
-
-            for item in parsed:
-                results.append(VerificationResult(
-                    post_id=item["post_id"],
-                    credibility=item.get("credibility", "unverified"),
-                    reason=item.get("reason"),
-                ))
-                verified_ids.add(item["post_id"])
-        except Exception as e:
-            logger.warning(f"신뢰도 판정 실패 (검증 스킵): {e}")
-
-        # 검증 대상이 아닌 게시물은 verified로 처리
-        for p in posts:
-            if p.id not in verified_ids:
-                results.append(VerificationResult(
-                    post_id=p.id, credibility="verified"
-                ))
-
-        contradicted = sum(1 for r in results if r.credibility == "contradicted")
-        unverified = sum(1 for r in results if r.credibility == "unverified")
-        verified = sum(1 for r in results if r.credibility == "verified")
-        logger.info(
-            f"신뢰도 검증 완료: {len(results)}건 "
-            f"(검증됨: {verified}, 미검증: {unverified}, 허위/스캠: {contradicted})"
-        )
-        return results
-
-    def _web_search(self, query: str, max_results: int = 5) -> list[dict] | None:
-        """DuckDuckGo로 웹 검색.
-
-        - 성공: 결과 리스트 반환(결과가 없으면 빈 리스트 []).
-        - 실패(rate limit/네트워크 등): None 반환 → 호출부가 '검증 불가'로 처리해
-          정상 게시물을 스캠으로 오판하지 않도록 한다.
-        """
-        try:
-            with DDGS() as ddgs:
-                results = list(ddgs.text(query, max_results=max_results))
-            return [
-                {"title": r.get("title", ""), "body": r.get("body", ""), "href": r.get("href", "")}
-                for r in results
-            ]
-        except Exception as e:
-            logger.warning(f"웹 검색 실패 '{query[:50]}': {e}")
-            return None
 
     async def deduplicate_and_merge(self, posts: list[Post]) -> list[MergedTopic]:
         """중복 제거 + 토픽 통합 (GPT-4o 사용, 청킹)."""
@@ -689,3 +559,145 @@ class OpenAIProcessor:
 
         logger.info(f"2차 청크 간 병합: {len(topics)}개 → {len(merged_topics)}개 토픽")
         return merged_topics
+
+
+class OpenAIProcessor(BaseLLMProcessor):
+    """OpenAI GPT API 백엔드 (Chat Completions + DuckDuckGo 웹검증)."""
+
+    def __init__(self, api_key: str, config: ProcessingConfig):
+        self._client = OpenAI(api_key=api_key)
+        self._config = config
+
+    def _call_api(self, model: str, prompt: str, max_tokens: int = 4096) -> str:
+        """OpenAI Chat Completions API 동기 호출."""
+        is_legacy = "gpt-4o" in model
+        params: dict = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
+        }
+        if is_legacy:
+            params["max_tokens"] = max_tokens
+            params["temperature"] = 0.1
+        else:
+            params["max_completion_tokens"] = max_tokens
+        response = self._client.chat.completions.create(**params)
+        return response.choices[0].message.content or ""
+
+    async def verify_claims(self, posts: list[Post]) -> list[VerificationResult]:
+        """게시물의 핵심 주장을 웹 검색(DuckDuckGo)으로 교차 검증."""
+        if not posts:
+            return []
+
+        # 1단계: GPT로 검증이 필요한 핵심 주장 추출
+        posts_json = _posts_to_json_lite(posts)
+        prompt = EXTRACT_CLAIMS.format(posts_json=posts_json)
+
+        try:
+            response_text = self._call_api(self._config.model_filter, prompt)
+            claims = _parse_json_response(response_text)
+        except Exception as e:
+            logger.warning(f"주장 추출 실패 (검증 스킵): {e}")
+            return [
+                VerificationResult(post_id=p.id, credibility="verified")
+                for p in posts
+            ]
+
+        # 검증 필요한 주장만 필터
+        claims_to_verify = [
+            c for c in claims
+            if c.get("needs_verification") and c.get("claim") and c.get("post_id")
+        ]
+
+        if not claims_to_verify:
+            logger.info("검증 필요한 주장 없음, 전체 통과")
+            return [
+                VerificationResult(post_id=p.id, credibility="verified")
+                for p in posts
+            ]
+
+        # 2단계: 웹 검색으로 각 주장 검증
+        # 검색이 '실패'(rate limit 등)한 주장은 검증 대상에서 제외한다.
+        # (검색 인프라 장애로 정상 뉴스를 스캠으로 오판해 떨어뜨리는 것을 방지)
+        verification_data = []
+        search_failed = 0
+        for claim_item in claims_to_verify:
+            search_results = self._web_search(claim_item["claim"])
+            if search_results is None:
+                search_failed += 1
+                continue
+            verification_data.append({
+                "post_id": claim_item["post_id"],
+                "claim": claim_item["claim"],
+                "search_results": search_results,
+            })
+
+        if search_failed:
+            logger.warning(
+                f"웹 검색 실패 {search_failed}건 — 해당 게시물은 검증 스킵(통과 처리)"
+            )
+
+        # 검증 가능한 주장이 하나도 없으면(전부 검색 실패) 전체 통과
+        if not verification_data:
+            logger.info("검색 가능한 주장 없음(검색 실패) — 전체 통과")
+            return [
+                VerificationResult(post_id=p.id, credibility="verified")
+                for p in posts
+            ]
+
+        # 3단계: GPT로 원문 vs 검색 결과 비교 판정
+        verification_json = json.dumps(verification_data, ensure_ascii=False, indent=2)
+        verify_prompt = VERIFY_CLAIMS.format(verification_data=verification_json)
+
+        results: list[VerificationResult] = []
+        verified_ids: set = set()
+
+        try:
+            response_text = self._call_api(self._config.model_filter, verify_prompt)
+            parsed = _parse_json_response(response_text)
+
+            for item in parsed:
+                results.append(VerificationResult(
+                    post_id=item["post_id"],
+                    credibility=item.get("credibility", "unverified"),
+                    reason=item.get("reason"),
+                ))
+                verified_ids.add(item["post_id"])
+        except Exception as e:
+            logger.warning(f"신뢰도 판정 실패 (검증 스킵): {e}")
+
+        # 검증 대상이 아닌 게시물은 verified로 처리
+        for p in posts:
+            if p.id not in verified_ids:
+                results.append(VerificationResult(
+                    post_id=p.id, credibility="verified"
+                ))
+
+        contradicted = sum(1 for r in results if r.credibility == "contradicted")
+        unverified = sum(1 for r in results if r.credibility == "unverified")
+        verified = sum(1 for r in results if r.credibility == "verified")
+        logger.info(
+            f"신뢰도 검증 완료: {len(results)}건 "
+            f"(검증됨: {verified}, 미검증: {unverified}, 허위/스캠: {contradicted})"
+        )
+        return results
+
+    def _web_search(self, query: str, max_results: int = 5) -> list[dict] | None:
+        """DuckDuckGo로 웹 검색.
+
+        - 성공: 결과 리스트 반환(결과가 없으면 빈 리스트 []).
+        - 실패(rate limit/네트워크 등): None 반환 → 호출부가 '검증 불가'로 처리해
+          정상 게시물을 스캠으로 오판하지 않도록 한다.
+        """
+        try:
+            with DDGS() as ddgs:
+                results = list(ddgs.text(query, max_results=max_results))
+            return [
+                {"title": r.get("title", ""), "body": r.get("body", ""), "href": r.get("href", "")}
+                for r in results
+            ]
+        except Exception as e:
+            logger.warning(f"웹 검색 실패 '{query[:50]}': {e}")
+            return None
