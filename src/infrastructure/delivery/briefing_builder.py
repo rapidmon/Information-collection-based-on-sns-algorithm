@@ -13,19 +13,7 @@ from html import escape as _esc
 from src.domain.entities import Briefing, BriefingItem
 from src.domain.services.ai_processor import MergedTopic
 from src.infrastructure.config.settings import BriefingConfig
-
-# 카테고리 한국어 매핑
-CATEGORY_KO = {
-    "AI": "AI",
-    "Semiconductor": "반도체",
-    "Cloud": "클라우드·인프라",
-    "Startup": "스타트업",
-    "BigTech": "빅테크",
-    "Regulation": "규제/정책",
-    "Coding": "코딩",
-    "Showcase": "메이커·쇼케이스",
-    "Other": "기타",
-}
+from src.infrastructure.delivery.categories import CATEGORY_KO  # 한국어 라벨 단일 소스
 
 # 카테고리 정렬 우선순위
 CATEGORY_ORDER = ["AI", "Semiconductor", "Cloud", "BigTech", "Startup", "Regulation", "Coding", "Showcase", "Other"]

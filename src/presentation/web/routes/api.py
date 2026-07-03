@@ -298,14 +298,10 @@ async def list_categories(request: Request):
     try:
         categories = await c.category_repo.get_all()
         if not categories:
+            from src.infrastructure.delivery.categories import CATEGORY_KO
             categories = [
-                {"name": "AI", "name_ko": "AI"},
-                {"name": "Semiconductor", "name_ko": "반도체"},
-                {"name": "Cloud", "name_ko": "클라우드"},
-                {"name": "BigTech", "name_ko": "빅테크"},
-                {"name": "Startup", "name_ko": "스타트업"},
-                {"name": "Regulation", "name_ko": "규제"},
-                {"name": "Coding", "name_ko": "코딩"},
+                {"name": k, "name_ko": ko}
+                for k, ko in CATEGORY_KO.items() if k != "Other"
             ]
         return categories
     except Exception:
