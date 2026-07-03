@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime
+from html import escape as _esc
 
 from src.domain.entities import Briefing, BriefingItem
 from src.domain.services.ai_processor import MergedTopic
@@ -28,6 +29,14 @@ CATEGORY_KO = {
 
 # 카테고리 정렬 우선순위
 CATEGORY_ORDER = ["AI", "Semiconductor", "Cloud", "BigTech", "Startup", "Regulation", "Coding", "Showcase", "Other"]
+
+
+def _safe_url(url: str) -> str:
+    """http/https URL만 허용하고 속성값으로 이스케이프 (javascript: 등 스킴 차단)."""
+    url = (url or "").strip()
+    if url.lower().startswith(("http://", "https://")):
+        return _esc(url, quote=True)
+    return "#"
 
 
 def _importance_to_stars(score: float) -> str:
@@ -183,20 +192,20 @@ class DefaultBriefingGenerator:
                     if line.startswith("- "):
                         line = line[2:]
                     if line:
-                        bullets_html += f'<div style="font-size:14px;line-height:1.7;color:#444;margin-bottom:4px;padding-left:16px;text-indent:-8px;">• {line}</div>\n'
+                        bullets_html += f'<div style="font-size:14px;line-height:1.7;color:#444;margin-bottom:4px;padding-left:16px;text-indent:-8px;">• {_esc(line)}</div>\n'
 
                 links_html = ""
                 if item.source_urls:
                     link_items = []
                     for i, url in enumerate(item.source_urls, 1):
-                        link_items.append(f'<a href="{url}" style="color:#4a90d9;text-decoration:none;" target="_blank">[원문 {i}]</a>')
+                        link_items.append(f'<a href="{_safe_url(url)}" style="color:#4a90d9;text-decoration:none;" target="_blank">[원문 {i}]</a>')
                     links_html = f'<div style="font-size:12px;margin-top:6px;">{" ".join(link_items)}</div>'
 
                 items_html += f"""
                 <div style="margin-bottom:20px;padding:16px;background:#f8f9fa;border-radius:6px;border-left:4px solid #4a90d9;">
-                    <div style="font-size:16px;font-weight:bold;margin-bottom:10px;color:#1a1a2e;">{item.headline}</div>
+                    <div style="font-size:16px;font-weight:bold;margin-bottom:10px;color:#1a1a2e;">{_esc(item.headline)}</div>
                     {bullets_html}
-                    <div style="font-size:12px;color:#999;margin-top:10px;">중요도: {stars} | 출처: {item.sources_summary}</div>
+                    <div style="font-size:12px;color:#999;margin-top:10px;">중요도: {stars} | 출처: {_esc(item.sources_summary)}</div>
                     {links_html}
                 </div>"""
 

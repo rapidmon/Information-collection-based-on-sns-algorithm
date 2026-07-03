@@ -23,10 +23,19 @@ _thread_local = threading.local()
 
 
 def _get_db() -> sqlite3.Connection:
-    """스레드 로컬 SQLite 연결 획득 (연결 풀)."""
+    """스레드 로컬 SQLite 연결 획득 (연결 풀).
+
+    WAL + busy_timeout으로 스케줄러/웹 스레드가 동시에 쓸 때 'database is locked'를 완화.
+    """
     if not hasattr(_thread_local, 'db') or _thread_local.db is None:
-        _thread_local.db = sqlite3.connect(DB_PATH, check_same_thread=False)
-        _thread_local.db.row_factory = sqlite3.Row
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=30.0)
+        conn.row_factory = sqlite3.Row
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA busy_timeout=30000")
+        except sqlite3.Error:
+            pass
+        _thread_local.db = conn
     return _thread_local.db
 
 

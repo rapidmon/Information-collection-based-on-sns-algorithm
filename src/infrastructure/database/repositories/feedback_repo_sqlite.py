@@ -10,21 +10,12 @@
 from __future__ import annotations
 
 import json
-import sqlite3
-import threading
-from pathlib import Path
 
-DB_PATH = Path("data/posts.db")
+# 같은 DB 파일(data/posts.db)을 쓰므로 post_repo의 커넥션 팩토리(WAL/타임아웃 포함)를
+# 공유한다 — 스레드당 핸들을 하나로 통일해 락 경합을 줄인다.
+from src.infrastructure.database.repositories.post_repo_sqlite import DB_PATH, _get_db
+
 VALID_LABELS = {"appropriate", "over", "under"}
-
-_thread_local = threading.local()
-
-
-def _get_db() -> sqlite3.Connection:
-    if not hasattr(_thread_local, "fb_db") or _thread_local.fb_db is None:
-        _thread_local.fb_db = sqlite3.connect(DB_PATH, check_same_thread=False)
-        _thread_local.fb_db.row_factory = sqlite3.Row
-    return _thread_local.fb_db
 
 
 class FeedbackRepositorySQLite:
@@ -75,8 +66,7 @@ class FeedbackRepositorySQLite:
                 category=excluded.category,
                 importance_score=excluded.importance_score,
                 tier=excluded.tier,
-                features=excluded.features,
-                created_at=CURRENT_TIMESTAMP
+                features=excluded.features
             """,
             (
                 str(briefing_id), int(item_index), headline, category,

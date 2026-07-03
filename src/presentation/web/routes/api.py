@@ -235,11 +235,14 @@ async def submit_feedback(request: Request):
     try:
         body = await request.json()
         briefing_id = body.get("briefing_id")
-        item_index = body.get("item_index")
         label = body.get("label")
+        try:
+            item_index = int(body.get("item_index"))
+        except (TypeError, ValueError):
+            return JSONResponse(status_code=400, content={"error": "item_index는 정수여야 함"})
 
-        if not briefing_id or item_index is None or label not in VALID_LABELS:
-            return JSONResponse(status_code=400, content={"error": "briefing_id/item_index/label 필요"})
+        if not briefing_id or label not in VALID_LABELS:
+            return JSONResponse(status_code=400, content={"error": "briefing_id/label 필요"})
 
         b = await c.briefing_repo.get_by_id(str(briefing_id))
         if not b or item_index < 0 or item_index >= len(b.items):
@@ -248,7 +251,7 @@ async def submit_feedback(request: Request):
         it = b.items[item_index]
         c.feedback_repo.upsert(
             briefing_id=str(briefing_id),
-            item_index=int(item_index),
+            item_index=item_index,
             headline=it.headline,
             category=it.category_name,
             importance_score=it.importance_score,
