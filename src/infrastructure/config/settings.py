@@ -90,10 +90,7 @@ class ProcessingConfig:
         self.claude_model_process: str = data.get("claude_model_process", "claude-sonnet-4-6")
         self.claude_timeout: int = data.get("claude_timeout", 300)
         self.batch_size_filter: int = data.get("batch_size_filter", 20)
-        self.batch_size_summarize: int = data.get("batch_size_summarize", 15)
         self.batch_size_categorize: int = data.get("batch_size_categorize", 20)
-        self.use_batch_api: bool = data.get("use_batch_api", True)
-        self.min_importance_for_briefing: float = data.get("min_importance_for_briefing", 0.7)
         self.dedup_chunk_size: int = data.get("dedup_chunk_size", 80)
         # verify_claims: 웹검증 대상 주장 상한(C) — 호출/쿼터 절감
         self.verify_max_claims: int = data.get("verify_max_claims", 8)

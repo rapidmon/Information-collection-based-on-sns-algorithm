@@ -161,32 +161,6 @@ async def cdp_connection(
         await pw.stop()
 
 
-async def get_or_create_page(context, match: str | None = None) -> Page:
-    """기존 탭을 최대한 재사용한다 (수집마다 새 창/탭이 뜨는 것 방지).
-
-    1) match(도메인 등)를 URL에 포함하는 탭이 있으면 그 탭 재사용
-    2) 없으면 빈 탭(about:blank/새 탭)을 재사용
-    3) 그래도 없으면 새 탭 생성
-    수집 후 탭을 닫지 않고 남겨두면 다음 사이클에 이 함수가 다시 그 탭을 찾아 쓴다.
-    """
-    pages = list(context.pages)
-    if match:
-        for p in pages:
-            try:
-                if match in (p.url or ""):
-                    return p
-            except Exception:
-                continue
-    for p in pages:
-        try:
-            u = p.url or ""
-            if u in ("", "about:blank") or u.startswith("chrome://newtab"):
-                return p
-        except Exception:
-            continue
-    return await context.new_page()
-
-
 async def minimize_window(page: Page) -> None:
     """페이지가 속한 Chrome 창을 최소화한다(새 탭 열 때 포커스 뺏김 방지).
 
@@ -211,7 +185,6 @@ async def check_session(
     source_name: str,
     feed_url: str,
     invalid_keywords: list[str],
-    match: str | None = None,
     require_substr: str | None = None,
     login_markers: str | None = None,
 ) -> bool:

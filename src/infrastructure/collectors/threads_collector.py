@@ -14,7 +14,7 @@ from typing import Any, Optional
 
 from src.domain.entities import Post
 from src.domain.exceptions import SessionExpiredError
-from src.infrastructure.collectors.cdp import auto_login, cdp_connection, check_session, get_or_create_page, minimize_window
+from src.infrastructure.collectors.cdp import auto_login, cdp_connection, check_session, minimize_window
 from src.infrastructure.config.settings import CollectorConfig, SnsCredentials
 
 logger = logging.getLogger(__name__)
@@ -45,7 +45,6 @@ class ThreadsCollector:
         # 로그인 화면 마커(로그인 링크·아이디 입력창)로 로그아웃을 감지.
         return await check_session(
             self._cdp_url, "threads", self.FEED_URL, ["login"],
-            match="threads",
             login_markers='a[href*="/login"], input[autocomplete="username"], input[name="username"]',
         )
 

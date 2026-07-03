@@ -80,10 +80,7 @@ processing:
   model_filter: "gpt-4o-mini"         # ai_backend=openai 일 때만 사용
   model_process: "gpt-5-mini"         # ai_backend=openai 일 때만 사용
   batch_size_filter: 20
-  batch_size_summarize: 15
   batch_size_categorize: 20
-  use_batch_api: true
-  min_importance_for_briefing: 0.85   # 병합 전 필터 (점수 산정을 절대기준으로 고쳐 중요 이슈는 자연히 통과)
   dedup_chunk_size: 30
   processing_interval_minutes: 30
   min_posts_to_process: 10

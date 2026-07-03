@@ -17,7 +17,7 @@ import logging
 import random
 
 from src.domain.entities import Post
-from src.infrastructure.collectors.cdp import cdp_connection, get_or_create_page, minimize_window
+from src.infrastructure.collectors.cdp import cdp_connection, minimize_window
 from src.infrastructure.config.settings import LikeConfig
 
 logger = logging.getLogger(__name__)

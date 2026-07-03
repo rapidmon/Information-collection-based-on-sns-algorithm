@@ -14,7 +14,7 @@ from typing import Any, Optional
 
 from src.domain.entities import Post
 from src.domain.exceptions import SessionExpiredError
-from src.infrastructure.collectors.cdp import cdp_connection, check_session, get_or_create_page, minimize_window
+from src.infrastructure.collectors.cdp import cdp_connection, check_session, minimize_window
 from src.infrastructure.config.settings import CollectorConfig, SnsCredentials
 
 logger = logging.getLogger(__name__)
@@ -44,7 +44,6 @@ class TwitterCollector:
         # 로그인 시 /home에 머물고, 로그아웃 시 x.com/ 랜딩이나 로그인 플로우로 튕긴다.
         return await check_session(
             self._cdp_url, "twitter", self.FEED_URL, ["login", "flow"],
-            match="x.com",
             require_substr="/home",
             login_markers='[data-testid="loginButton"], a[href*="/i/flow/login"], a[href="/login"]',
         )
