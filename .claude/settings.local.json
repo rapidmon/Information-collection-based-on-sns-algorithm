@@ -112,7 +112,17 @@
       "Bash(PYTHONIOENCODING=utf-8 ./.venv/Scripts/python.exe build_preview.py)",
       "Bash(PYTHONIOENCODING=utf-8 ./.venv/Scripts/python.exe -c \"import src.infrastructure.ai.claude_code_processor; import main; print\\('임포트 OK'\\)\")",
       "Bash(grep -rnE \"bring_to_front|\\\\.focus\\\\\\(|activate|createTarget\" src/infrastructure/collectors/)",
-      "Bash(grep -rn \"new_page\" src/infrastructure/collectors/)"
+      "Bash(grep -rn \"new_page\" src/infrastructure/collectors/)",
+      "Bash(awk -F']' '{print}')",
+      "Bash(PYTHONIOENCODING=utf-8 ./.venv/Scripts/python.exe \"C:/Users/DONGA/AppData/Local/Temp/claude/C--Users-DONGA-Desktop-Information-collection-based-on-sns-algorithm/31287164-c02a-405c-b185-1c977ff2bffd/scratchpad/resend_today.py\")",
+      "Bash(PYTHONIOENCODING=utf-8 PYTHONPATH=\"C:/Users/DONGA/Desktop/Information-collection-based-on-sns-algorithm\" ./.venv/Scripts/python.exe \"C:/Users/DONGA/AppData/Local/Temp/claude/C--Users-DONGA-Desktop-Information-collection-based-on-sns-algorithm/31287164-c02a-405c-b185-1c977ff2bffd/scratchpad/resend_today.py\")",
+      "Bash(PYTHONIOENCODING=utf-8 PYTHONPATH=\"C:/Users/DONGA/Desktop/Information-collection-based-on-sns-algorithm\" ./.venv/Scripts/python.exe \"C:/Users/DONGA/AppData/Local/Temp/claude/C--Users-DONGA-Desktop-Information-collection-based-on-sns-algorithm/31287164-c02a-405c-b185-1c977ff2bffd/scratchpad/send_new_audiences.py\")",
+      "Bash(PYTHONIOENCODING=utf-8 ./.venv/Scripts/python.exe -c \"import main; from src.infrastructure.collectors.cdp import cdp_connection; print\\('임포트 OK'\\)\")",
+      "PowerShell(Write-Output \"===== 9222 포트 리스닝 여부 =====\"; $c = Test-NetConnection -ComputerName 127.0.0.1 -Port 9222 -WarningAction SilentlyContinue; Write-Output \\(\"9222 열림: \" + $c.TcpTestSucceeded\\); Write-Output \"===== chrome.exe 프로세스 수 =====\"; $p = Get-Process chrome -ErrorAction SilentlyContinue; Write-Output \\(\"chrome.exe 개수: \" + \\($p | Measure-Object\\).Count\\); Write-Output \"===== 9222 리스닝 소켓 =====\"; try { Get-NetTCPConnection -LocalPort 9222 -State Listen -ErrorAction Stop | Select-Object LocalAddress,LocalPort,OwningProcess | Format-Table -AutoSize | Out-String } catch { Write-Output \"9222 리스닝 소켓 없음\" })",
+      "Bash(PYTHONIOENCODING=utf-8 ./.venv/Scripts/python.exe -c \"import main; print\\('임포트 OK'\\)\")",
+      "Bash(PYTHONIOENCODING=utf-8 ./.venv/Scripts/python.exe -c \"import main; from src.infrastructure.collectors.cdp import _safe_restart_chrome; print\\('임포트 OK'\\)\")",
+      "PowerShell(Get-Process *)",
+      "Bash(PYTHONIOENCODING=utf-8 ./.venv/Scripts/python.exe -c \"import main; print\\('api 임포트 OK'\\)\")"
     ],
     "disallow": [
       "Bash(git push)"

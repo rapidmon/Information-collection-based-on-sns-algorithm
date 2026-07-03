@@ -1,7 +1,7 @@
 """유즈케이스: AI 처리 파이프라인.
 
-미처리 게시물을 가져와 필터링, 요약, 분류를 수행한다.
-관련 없는 게시물은 Firestore에서 삭제한다.
+미처리 게시물(SQLite)을 청크 단위로 가져와 필터링·요약·분류를 수행하고
+결과를 DB에 반영한다. 비관련 게시물은 삭제하지 않고 is_relevant=False로만 표시한다.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ class ProcessPostsUseCase:
         min_posts_threshold: int = 0,
     ) -> dict[str, int]:
         """미처리 게시물을 청크 단위로 가져와 AI 처리. 처리 통계를 반환."""
-        totals = {"total": 0, "relevant": 0, "filtered_out": 0, "deleted": 0}
+        totals = {"total": 0, "relevant": 0, "filtered_out": 0}
         processed_total = 0
         first_fetch = True
 
@@ -124,5 +124,4 @@ class ProcessPostsUseCase:
             "total": len(posts),
             "relevant": len(relevant_posts),
             "filtered_out": len(irrelevant_posts),
-            "deleted": 0,
         }

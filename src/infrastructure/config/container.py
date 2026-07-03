@@ -11,7 +11,6 @@ from src.application.use_cases.collect_posts import CollectPostsUseCase
 from src.application.use_cases.generate_briefing import GenerateBriefingUseCase
 from src.application.use_cases.like_posts import LikePostsUseCase
 from src.application.use_cases.process_posts import ProcessPostsUseCase
-from src.application.use_cases.send_briefing import SendBriefingUseCase
 from src.infrastructure.ai.claude_code_processor import ClaudeCodeProcessor
 from src.infrastructure.ai.openai_processor import OpenAIProcessor
 from src.infrastructure.collectors.dcinside_collector import DCInsideCollector
@@ -148,15 +147,8 @@ class Container:
             briefing_repo=self.briefing_repo,
             ai_processor=self.ai_processor,
             briefing_generator=self.briefing_generator,
-            processing_config=self.config.processing,
             scoring_config=self.config.scoring,
             feedback_repo=self.feedback_repo,
-        )
-
-    def send_briefing_use_case(self) -> SendBriefingUseCase:
-        return SendBriefingUseCase(
-            briefing_repo=self.briefing_repo,
-            notifier=self.notifier,
         )
 
     async def send_curated_briefing(self, briefing) -> dict:

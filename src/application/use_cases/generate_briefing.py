@@ -23,7 +23,7 @@ from src.domain.repositories.post_repository import PostRepository
 from src.domain.services.ai_processor import AIProcessor
 from src.domain.services.briefing_generator import BriefingGenerator
 from src.infrastructure.ai.importance_scorer import score_topics
-from src.infrastructure.config.settings import ProcessingConfig, ScoringConfig
+from src.infrastructure.config.settings import ScoringConfig
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +38,6 @@ class GenerateBriefingUseCase:
         briefing_repo: BriefingRepository,
         ai_processor: AIProcessor,
         briefing_generator: BriefingGenerator,
-        processing_config: ProcessingConfig,
         scoring_config: ScoringConfig,
         feedback_repo=None,
     ):
@@ -46,7 +45,6 @@ class GenerateBriefingUseCase:
         self._briefing_repo = briefing_repo
         self._ai = ai_processor
         self._gen = briefing_generator
-        self._config = processing_config
         self._scoring = scoring_config
         self._feedback_repo = feedback_repo
 
