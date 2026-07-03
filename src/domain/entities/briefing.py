@@ -19,6 +19,7 @@ class BriefingItem:
     sort_order: int = 0
     source_count: int = 0
     sources_summary: str = ""
+    body_bullets: list[str] = field(default_factory=list)  # 구조화 불릿(텍스트 재파싱 방지)
     source_post_ids: list[int] = field(default_factory=list)
     source_urls: list[str] = field(default_factory=list)
     tier: str = "minor"                              # LLM 절대 등급

@@ -35,6 +35,7 @@ def _item_to_dict(item: BriefingItem) -> dict[str, Any]:
     return {
         "headline": item.headline,
         "body": item.body,
+        "body_bullets": item.body_bullets,
         "importance_score": item.importance_score,
         "category_name": item.category_name,
         "sort_order": item.sort_order,
@@ -54,6 +55,7 @@ def _briefing_from_doc(doc) -> Briefing:
         BriefingItem(
             headline=i.get("headline", ""),
             body=i.get("body", ""),
+            body_bullets=i.get("body_bullets", []) or [],
             importance_score=i.get("importance_score", 0.5),
             category_name=i.get("category_name"),
             sort_order=i.get("sort_order", 0),

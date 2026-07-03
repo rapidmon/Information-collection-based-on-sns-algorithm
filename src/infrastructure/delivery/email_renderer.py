@@ -83,7 +83,10 @@ def render_email_html(briefing: Briefing, curation: Curation, logo_src: str,
             P.append(f"""<div style="background:#f3f7ff;border:1px solid #e0eaff;border-radius:12px;padding:14px 16px;margin-bottom:18px;">
       <div style="font-size:14px;font-weight:700;color:#1d4ed8;margin-bottom:7px;">“{_esc(cc.hook)}”</div>{bl}{ins}</div>""")
         for it in its:
-            lines = [l.strip().lstrip("- ").strip() for l in (it.body or "").split("\n") if l.strip()]
+            # 구조화 불릿 우선, 없으면(구버전) body에서 폴백
+            lines = list(it.body_bullets) if it.body_bullets else [
+                l.strip().lstrip("- ").strip() for l in (it.body or "").split("\n") if l.strip()
+            ]
             bh = "".join(f'<div style="font-size:13.5px;line-height:1.72;color:#475467;margin:0 0 5px;padding-left:15px;text-indent:-9px;"><span style="color:#cdd3dc;">•</span> {_esc(l)}</div>' for l in lines)
             urls = it.source_urls or []
             chips = "".join(f'<a href="{u}" style="display:inline-block;background:#f1f5fb;color:#3b82f6;font-size:11px;font-weight:600;padding:4px 11px;border-radius:999px;text-decoration:none;margin:0 6px 6px 0;">원문 {i}</a>' for i, u in enumerate(urls, 1))

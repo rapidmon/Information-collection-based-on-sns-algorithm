@@ -159,7 +159,10 @@ class Container:
         ecfg = self.config.email
         topics = []
         for it in briefing.items:
-            bullets = [l.strip().lstrip("- ").strip() for l in (it.body or "").split("\n") if l.strip()]
+            # 구조화 불릿을 그대로 사용(재파싱 방지). 구버전 브리핑엔 없으므로 body에서 폴백.
+            bullets = list(it.body_bullets) if it.body_bullets else [
+                l.strip().lstrip("- ").strip() for l in (it.body or "").split("\n") if l.strip()
+            ]
             topics.append(MergedTopic(
                 post_ids=it.source_post_ids or [], headline=it.headline, body_bullets=bullets,
                 primary_category=it.category_name or "AI",

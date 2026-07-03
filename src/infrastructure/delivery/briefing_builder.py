@@ -85,6 +85,7 @@ class DefaultBriefingGenerator:
                 BriefingItem(
                     headline=topic.headline,
                     body=body,
+                    body_bullets=list(topic.body_bullets or []),
                     importance_score=topic.importance_score,
                     category_name=topic.primary_category,
                     sort_order=idx,
