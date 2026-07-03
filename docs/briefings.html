@@ -6,6 +6,14 @@
     <title>브리핑 아카이브 - SNS Tech Briefing</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="css/style.css">
+    <style>
+        .fb-btn {
+            font-size: 12px; padding: 4px 10px; border-radius: 6px;
+            border: 1px solid var(--border); background: transparent;
+            color: var(--text-secondary); cursor: pointer; transition: all .15s;
+        }
+        .fb-btn:hover { border-color: var(--accent, #4a90d9); }
+    </style>
 </head>
 <body class="min-h-screen">
     <!-- 네비게이션 -->
@@ -58,6 +66,7 @@
     <script type="module">
         import { getBriefings, getBriefingById } from './js/firestore-api.js';
         import { formatTimestamp, escapeHtml, showError, showEmpty, setActiveNav } from './js/app.js';
+        import { API_BASE_URL } from './js/config.js';
 
         setActiveNav();
 
@@ -96,6 +105,73 @@
                     ${emailBadge}
                 </div>
             </div>`;
+        }
+
+        // ─── 항목별 피드백 (적절/과대/과소) ───
+        const FB_COLORS = { appropriate: '#16a34a', over: '#dc2626', under: '#2563eb' };
+
+        function renderItemsWithFeedback(b, items, labels) {
+            const btn = (idx, label, text, cur) =>
+                `<button type="button" class="fb-btn" data-label="${label}" style="${cur === label ? `background:${FB_COLORS[label]};color:#fff;` : ''}">${text}</button>`;
+            let html = `<div class="mb-3 text-sm" style="color:var(--text-muted);">각 항목의 <b>중요도 점수</b>가 적절한지 평가해 주세요 —
+                <span style="color:#16a34a;">적절</span> / <span style="color:#dc2626;">과대</span> / <span style="color:#2563eb;">과소</span>. 다음 브리핑 채점 보정에 쓰입니다.</div>
+                <div class="space-y-3">`;
+            items.forEach((it, idx) => {
+                const cur = labels[idx];
+                const f = it.score_features || {};
+                const meta = [
+                    escapeHtml(it.category_name || 'Other'),
+                    `점수 ${(Number(it.importance_score) || 0).toFixed(2)}`,
+                    (it.tier && it.tier !== 'minor') ? `<b>${escapeHtml(it.tier)}</b>` : '',
+                    (f.frequency) ? `출처 ${f.frequency} · 인게 ${f.engagement_pct}` : '',
+                ].filter(Boolean).join(' · ');
+                html += `
+                <div class="rounded-lg p-4" style="background:#f8f9fa;border:1px solid var(--border);">
+                    <div class="flex items-start justify-between gap-3">
+                        <div class="flex-1">
+                            <div class="font-bold" style="color:var(--text-primary);">${escapeHtml(it.headline || '')}</div>
+                            <div class="text-xs mt-1" style="color:var(--text-muted);">${meta}</div>
+                            <div class="text-sm mt-2 whitespace-pre-wrap" style="color:var(--text-secondary);">${escapeHtml(it.body || '')}</div>
+                        </div>
+                        <div class="flex gap-1 shrink-0 fb-group" data-idx="${idx}">
+                            ${btn(idx, 'appropriate', '적절', cur)}
+                            ${btn(idx, 'over', '과대', cur)}
+                            ${btn(idx, 'under', '과소', cur)}
+                        </div>
+                    </div>
+                </div>`;
+            });
+            html += `</div>`;
+            if (b.content_html) {
+                html += `<details class="mt-6"><summary class="text-sm cursor-pointer" style="color:var(--text-muted);">전체 브리핑 미리보기 (이메일 형식)</summary>
+                    <div class="mt-3 briefing-content">${b.content_html}</div></details>`;
+            }
+            return html;
+        }
+
+        function attachFeedbackHandlers(root, briefingId) {
+            root.querySelectorAll('.fb-btn').forEach(btn => {
+                btn.addEventListener('click', () => sendFeedback(btn, briefingId));
+            });
+        }
+
+        async function sendFeedback(btn, briefingId) {
+            const group = btn.closest('.fb-group');
+            const idx = parseInt(group.dataset.idx, 10);
+            const label = btn.dataset.label;
+            group.querySelectorAll('.fb-btn').forEach(b => { b.style.background = ''; b.style.color = ''; });
+            btn.style.background = FB_COLORS[label]; btn.style.color = '#fff';
+            try {
+                const res = await fetch(`${API_BASE_URL}/feedback`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ briefing_id: briefingId, item_index: idx, label }),
+                });
+                if (!res.ok) throw new Error(await res.text());
+            } catch (e) {
+                btn.style.background = ''; btn.style.color = '';
+                alert('저장 실패: ' + e.message);
+            }
         }
 
         // 브리핑 목록 로드
@@ -182,9 +258,23 @@
                 const periodEnd = formatTimestamp(b.period_end);
                 metaEl.textContent = `${periodStart} ~ ${periodEnd} | 분석: ${b.total_posts_analyzed || 0}건 → ${b.total_items || 0}개 항목`;
 
-                if (b.content_html) {
+                const items = Array.isArray(b.items) ? b.items : [];
+                if (items.length) {
+                    // 기존 피드백 라벨(있으면 버튼 하이라이트)
+                    let labels = {};
+                    try {
+                        const r = await fetch(`${API_BASE_URL}/feedback/${encodeURIComponent(briefingId)}`);
+                        if (r.ok) labels = await r.json();
+                    } catch (_) {}
+
+                    contentEl.innerHTML = renderItemsWithFeedback(b, items, labels);
+                    attachFeedbackHandlers(contentEl, briefingId);
+                    contentEl.querySelectorAll('.briefing-content a').forEach(a => {
+                        a.target = '_blank'; a.rel = 'noopener noreferrer';
+                        if (a.href.includes('twitter.com')) a.href = a.href.replace('twitter.com', 'x.com');
+                    });
+                } else if (b.content_html) {
                     contentEl.innerHTML = b.content_html;
-                    // Patch links to open in new tabs and normalize twitter.com → x.com
                     contentEl.querySelectorAll('a').forEach(a => {
                         a.target = '_blank';
                         a.rel = 'noopener noreferrer';

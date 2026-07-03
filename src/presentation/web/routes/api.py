@@ -261,6 +261,16 @@ async def submit_feedback(request: Request):
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
+@router.get("/feedback/{briefing_id}")
+async def get_feedback(request: Request, briefing_id: str):
+    """해당 브리핑의 항목별 피드백 라벨 조회 {item_index: label} (버튼 상태 표시용)."""
+    c = _get_container(request)
+    try:
+        return c.feedback_repo.get_for_briefing(str(briefing_id))
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
 @router.get("/keywords/top")
 async def top_keywords(request: Request, limit: int = 20, days: int = 2):
     """최근 N일간 자주 언급된 키워드 top K."""
