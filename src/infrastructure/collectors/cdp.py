@@ -62,7 +62,9 @@ def _safe_restart_chrome(source_name: str) -> None:
     --restore-last-session 미사용(탭/창 증식 없음), 디버그 포트를 가진 Chrome만
     프로세스 트리로 종료(일반 Chrome은 건드리지 않음). 쿨다운은 호출부에서 관리.
     """
+    import os
     import subprocess
+    import time as _time
 
     pids, user_dir = _detect_debug_chrome()
     for pid in pids:
@@ -70,6 +72,16 @@ def _safe_restart_chrome(source_name: str) -> None:
             subprocess.run(["taskkill", "/F", "/T", "/PID", pid], capture_output=True, timeout=6)
         except Exception:
             pass
+
+    # 프로필 락이 풀리도록 대기 (즉시 재실행하면 single-instance 충돌로 9222가 안 열린다)
+    _time.sleep(3)
+    # 스테일 락 파일 제거 — attach만 하고 죽는 것 방지
+    for name in ("SingletonLock", "SingletonSocket", "SingletonCookie"):
+        try:
+            os.remove(os.path.join(user_dir, name))
+        except OSError:
+            pass
+
     try:
         subprocess.Popen([
             _CHROME_PATH,
