@@ -23,31 +23,36 @@ _last_restart_monotonic = 0.0
 
 
 def _detect_debug_chrome() -> tuple[list[str], str]:
-    """--remote-debugging-port를 가진 Chrome의 (PID 목록, user-data-dir)를 반환."""
+    """--remote-debugging-port를 가진 Chrome의 (PID 목록, user-data-dir)를 반환.
+
+    wmic은 Windows 11에서 제거됐으므로 PowerShell CIM(Get-CimInstance)을 사용한다.
+    """
     import subprocess
 
     pids: list[str] = []
-    user_dir = r"C:\chrome_temp"
+    dirs: list[str] = []
+    ps = (
+        "Get-CimInstance Win32_Process | "
+        "Where-Object { $_.Name -eq 'chrome.exe' -and $_.CommandLine -like '*remote-debugging-port*' } | "
+        "ForEach-Object { 'PID=' + $_.ProcessId; "
+        "if ($_.CommandLine -match '--user-data-dir=(\\S+)') { 'UD=' + $matches[1] } }"
+    )
     try:
         r = subprocess.run(
-            ["wmic", "process", "where",
-             "name='chrome.exe' and commandline like '%remote-debugging-port%'",
-             "get", "processid,commandline"],
-            capture_output=True, text=True, timeout=6,
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+            capture_output=True, text=True, timeout=15,
         )
         for line in r.stdout.splitlines():
             line = line.strip()
-            if not line or line.lower().startswith("commandline"):
-                continue
-            if "--user-data-dir=" in line:
-                for part in line.split():
-                    if part.startswith("--user-data-dir="):
-                        user_dir = part.split("=", 1)[1].strip('"')
-            toks = line.split()
-            if toks and toks[-1].isdigit():
-                pids.append(toks[-1])
+            if line.startswith("PID=") and line[4:].isdigit():
+                pids.append(line[4:])
+            elif line.startswith("UD="):
+                dirs.append(line[3:].strip().strip('"'))
     except Exception:
         pass
+
+    # 재실행 프로필은 로그인 세션이 있는 표준 chrome_temp를 우선 사용
+    user_dir = next((d for d in dirs if "chrome_temp" in d), dirs[0] if dirs else r"C:\chrome_temp")
     return pids, user_dir
 
 
