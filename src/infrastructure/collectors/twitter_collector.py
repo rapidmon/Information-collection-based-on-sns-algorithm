@@ -15,30 +15,17 @@ from typing import Any, Optional
 from src.domain.entities import Post
 from src.domain.exceptions import SessionExpiredError
 from src.infrastructure.collectors.cdp import cdp_connection, check_session, minimize_window
-from src.infrastructure.config.settings import CollectorConfig, SnsCredentials
+from src.infrastructure.collectors.base_collector import BaseCdpCollector
 
 logger = logging.getLogger(__name__)
 
 
-class TwitterCollector:
+class TwitterCollector(BaseCdpCollector):
     """X(Twitter) CDP 기반 수집기. 실행 중인 Chrome에 연결."""
 
+    SOURCE = "twitter"
     FEED_URL = "https://x.com/home"
     TIMELINE_PATTERNS = ["HomeTimeline", "HomeLatestTimeline"]
-
-    def __init__(
-        self,
-        config: CollectorConfig,
-        credentials: SnsCredentials | None = None,
-        cdp_port: int = 9222,
-    ):
-        self._config = config
-        self._credentials = credentials or SnsCredentials()
-        self._cdp_url = f"http://127.0.0.1:{cdp_port}"
-
-    @property
-    def source_name(self) -> str:
-        return "twitter"
 
     async def is_session_valid(self) -> bool:
         # 로그인 시 /home에 머물고, 로그아웃 시 x.com/ 랜딩이나 로그인 플로우로 튕긴다.

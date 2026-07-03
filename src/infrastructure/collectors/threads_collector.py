@@ -15,30 +15,17 @@ from typing import Any, Optional
 from src.domain.entities import Post
 from src.domain.exceptions import SessionExpiredError
 from src.infrastructure.collectors.cdp import auto_login, cdp_connection, check_session, minimize_window
-from src.infrastructure.config.settings import CollectorConfig, SnsCredentials
+from src.infrastructure.collectors.base_collector import BaseCdpCollector
 
 logger = logging.getLogger(__name__)
 
 
-class ThreadsCollector:
+class ThreadsCollector(BaseCdpCollector):
     """Threads 알고리즘 피드 수집기 (CDP 기반)."""
 
+    SOURCE = "threads"
     FEED_URL = "https://www.threads.net/"
     GRAPHQL_PATTERNS = ["api/graphql", "graphql"]
-
-    def __init__(
-        self,
-        config: CollectorConfig,
-        credentials: SnsCredentials | None = None,
-        cdp_port: int = 9222,
-    ):
-        self._config = config
-        self._credentials = credentials or SnsCredentials()
-        self._cdp_url = f"http://127.0.0.1:{cdp_port}"
-
-    @property
-    def source_name(self) -> str:
-        return "threads"
 
     async def is_session_valid(self) -> bool:
         # Threads 피드는 로그인/로그아웃 모두 루트 URL이라 URL만으론 구분 불가 →
