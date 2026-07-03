@@ -99,27 +99,14 @@ class ClaudeCodeProcessor(OpenAIProcessor):
             return [comspec, "/c", self._claude_bin, *args]
         return [self._claude_bin, *args]
 
-    def _call_api(self, model: str, prompt: str, max_tokens: int = 4096) -> str:
-        """`claude -p`를 헤드리스로 호출하고 모델의 텍스트 응답을 반환한다.
+    def _run_claude(self, args: list[str], prompt: str, label: str = "claude") -> str:
+        """`claude -p`를 헤드리스로 실행하고 응답 봉투의 result(텍스트)를 반환한다.
 
-        base 클래스는 필터/분류/검증 단계에 config.model_filter를,
-        통합 단계에 config.model_process를 넘긴다. 그 구분에 따라
-        Claude 필터/통합 모델을 매핑한다. (max_tokens는 CLI에서 무시)
+        subprocess 실행·타임아웃·종료코드·봉투 JSON 파싱·is_error 처리를 한곳에 모은다.
+        역할/규칙(SYSTEM_PROMPT)은 시스템 주입이 아니라 사용자 프롬프트 최상단에 둔다.
         """
-        claude_model = (
-            self._claude_model_process
-            if model == self._config.model_process
-            else self._claude_model_filter
-        )
-
-        # 역할/규칙을 사용자 프롬프트 최상단에 둔다(시스템 주입 아님).
         full_prompt = f"{SYSTEM_PROMPT}\n\n{prompt}"
-
-        args = ["-p", "--output-format", "json", "--max-turns", "1"]
-        if claude_model:
-            args += ["--model", claude_model]
         cmd = self._build_command(args)
-
         try:
             proc = subprocess.run(
                 cmd,
@@ -132,30 +119,36 @@ class ClaudeCodeProcessor(OpenAIProcessor):
                 timeout=self._timeout,
             )
         except subprocess.TimeoutExpired as e:
-            raise RuntimeError(f"claude CLI 타임아웃({self._timeout}s)") from e
+            raise RuntimeError(f"{label} 타임아웃({self._timeout}s)") from e
 
         if proc.returncode != 0:
-            raise RuntimeError(
-                f"claude CLI 종료코드 {proc.returncode}: {(proc.stderr or '')[:300]}"
-            )
+            raise RuntimeError(f"{label} 종료코드 {proc.returncode}: {(proc.stderr or '')[:300]}")
 
         try:
             envelope = json.loads(proc.stdout)
         except json.JSONDecodeError as e:
-            raise RuntimeError(
-                f"claude 응답 봉투 JSON 파싱 실패: {(proc.stdout or '')[:300]}"
-            ) from e
+            raise RuntimeError(f"{label} 응답 봉투 JSON 파싱 실패: {(proc.stdout or '')[:300]}") from e
 
         if envelope.get("is_error"):
-            raise RuntimeError(f"claude 처리 오류: {str(envelope.get('result'))[:300]}")
+            raise RuntimeError(f"{label} 처리 오류: {str(envelope.get('result'))[:300]}")
 
-        # 봉투의 result 필드에 모델의 실제 텍스트(요구한 JSON 배열)가 담겨 있다.
-        # base의 _parse_json_response가 코드펜스/잡텍스트를 걸러 배열만 추출한다.
+        # 봉투의 result에 모델의 실제 텍스트가 담긴다. 파싱은 base의 _parse_json_response가 처리.
         return envelope.get("result", "")
+
+    def _call_api(self, model: str, prompt: str, max_tokens: int = 4096) -> str:
+        """필터/분류/검증엔 filter 모델, 통합엔 process 모델을 매핑해 호출. (max_tokens는 CLI 무시)"""
+        claude_model = (
+            self._claude_model_process
+            if model == self._config.model_process
+            else self._claude_model_filter
+        )
+        args = ["-p", "--output-format", "json", "--max-turns", "1"]
+        if claude_model:
+            args += ["--model", claude_model]
+        return self._run_claude(args, prompt, label="claude CLI")
 
     def _call_api_with_search(self, prompt: str, max_turns: int = 15) -> str:
         """WebSearch 도구를 허용해 Claude가 직접 웹을 검색하며 응답하게 한다(구독, API 키 X)."""
-        full_prompt = f"{SYSTEM_PROMPT}\n\n{prompt}"
         args = [
             "-p", "--output-format", "json",
             "--allowedTools", "WebSearch",
@@ -163,21 +156,7 @@ class ClaudeCodeProcessor(OpenAIProcessor):
         ]
         if self._claude_model_filter:
             args += ["--model", self._claude_model_filter]
-        cmd = self._build_command(args)
-
-        try:
-            proc = subprocess.run(
-                cmd, input=full_prompt, capture_output=True, text=True,
-                encoding="utf-8", cwd=self._work_dir, env=self._env, timeout=self._timeout,
-            )
-        except subprocess.TimeoutExpired as e:
-            raise RuntimeError(f"claude WebSearch 타임아웃({self._timeout}s)") from e
-        if proc.returncode != 0:
-            raise RuntimeError(f"claude WebSearch 종료코드 {proc.returncode}: {(proc.stderr or '')[:300]}")
-        envelope = json.loads(proc.stdout)
-        if envelope.get("is_error"):
-            raise RuntimeError(f"claude WebSearch 오류: {str(envelope.get('result'))[:300]}")
-        return envelope.get("result", "")
+        return self._run_claude(args, prompt, label="claude WebSearch")
 
     async def verify_claims(self, posts: list) -> list:
         """Claude 내장 WebSearch로 교차검증(DuckDuckGo 미사용). 실패 시 전체 통과.
