@@ -76,10 +76,11 @@ def score_topics(
         # post_ids가 LLM JSON에서 문자열로 올 수 있어 str 키로 통일 조회
         members = [post_map[str(pid)] for pid in (t.post_ids or []) if str(pid) in post_map]
 
-        # ① 빈도 = 고유 출처 수 (같은 계정 중복 제거; 여러 계정이 다룰수록 화제).
-        #    author가 비면(스크랩 소스) post별로 쪼개지 말고 '소스' 단위로 묶는다.
-        authors = {(m.source, (m.author or "")) for m in members}
-        freq = len(authors) if authors else max(1, len(t.post_ids or []))
+        # ① 빈도 = 고유 출처(계정) 수 (여러 계정이 다룰수록 화제).
+        #    author가 있으면 그 계정으로 묶어(1인 다(多)글=1) 도배를 방지하고,
+        #    author를 못 긁는 소스(DCInside 등)는 각 글을 별개 화자로 본다(계정URL→글ID).
+        voices = {(m.source, (m.author or m.author_url or m.id)) for m in members}
+        freq = len(voices) if voices else max(1, len(t.post_ids or []))
 
         # ② 인게이지먼트 = 구성 게시물 중 '플랫폼별 백분위' 최고값 (플랫폼 스케일 차이 보정)
         eng = 0.0
