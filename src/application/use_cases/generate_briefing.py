@@ -62,7 +62,8 @@ class GenerateBriefingUseCase:
             )
 
         logger.info(f"브리핑 생성 시작: {len(posts)}건 미브리핑 게시물")
-        post_map = {p.id: p for p in posts if p.id is not None}
+        # LLM이 post_ids를 문자열/정수 어느 쪽으로 반환해도 맞도록 str 키로 통일
+        post_map = {str(p.id): p for p in posts if p.id is not None}
 
         # ① 클러스터링 (같은 사건 병합)
         merged_topics = await self._ai.deduplicate_and_merge(posts)
@@ -80,6 +81,11 @@ class GenerateBriefingUseCase:
             except Exception as e:
                 logger.warning(f"피드백 예시 조회 실패(무시): {e}")
         tiers = await self._ai.judge_tiers(merged_topics, calibration_examples=calibration)
+        if len(tiers) != len(merged_topics):
+            logger.warning(
+                f"티어 개수 불일치 (topics={len(merged_topics)}, tiers={len(tiers)}) — "
+                f"부족분은 minor로 남는다"
+            )
         for t, tier in zip(merged_topics, tiers):
             t.tier = tier
 
@@ -121,9 +127,9 @@ class GenerateBriefingUseCase:
         vposts, seen = [], set()
         for t in top:
             for pid in (t.post_ids or []):
-                p = post_map.get(pid)
-                if p and pid not in seen and p.source != "producthunt":
-                    seen.add(pid)
+                p = post_map.get(str(pid))  # post_ids가 문자열일 수 있어 str 키 조회
+                if p and p.id not in seen and p.source != "producthunt":
+                    seen.add(p.id)
                     vposts.append(p)
         if not vposts:
             return topics
@@ -141,7 +147,9 @@ class GenerateBriefingUseCase:
         kept = []
         for t in topics:
             ids = t.post_ids or []
-            contra = [pid for pid in ids if pid in contradicted]
+            # 각 post_id를 실제 Post로 풀어 그 .id가 반박 집합에 있는지 본다(타입 통일)
+            member_posts = [post_map.get(str(pid)) for pid in ids]
+            contra = [p for p in member_posts if p and p.id in contradicted]
             if ids and len(contra) > len(ids) / 2:
                 logger.info(
                     f"스캠/허위로 클러스터 제외: {t.headline[:50]} "

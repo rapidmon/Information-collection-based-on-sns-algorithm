@@ -43,10 +43,14 @@ def _percentile_baselines(posts, cfg: ScoringConfig) -> dict[str, list[float]]:
 
 
 def _percentile(sorted_vals: list[float], v: float) -> float:
-    """정렬된 값들 중 v 이하의 비율 (0.0~1.0)."""
+    """정렬된 값들 중 v보다 '엄격히 작은' 값의 비율 (0.0~1.0).
+
+    bisect_left를 써서, 값이 모두 같거나(스크랩 글은 인게이지먼트 0) 표본이
+    1개뿐인 경우 1.0으로 뻥튀기되지 않고 0.0(신호 없음)으로 수렴하게 한다.
+    """
     if not sorted_vals:
         return 0.0
-    idx = bisect.bisect_right(sorted_vals, v)
+    idx = bisect.bisect_left(sorted_vals, v)
     return idx / len(sorted_vals)
 
 
@@ -69,10 +73,12 @@ def score_topics(
     raws: list[float] = []
 
     for t in topics:
-        members = [post_map[pid] for pid in (t.post_ids or []) if pid in post_map]
+        # post_ids가 LLM JSON에서 문자열로 올 수 있어 str 키로 통일 조회
+        members = [post_map[str(pid)] for pid in (t.post_ids or []) if str(pid) in post_map]
 
-        # ① 빈도 = 고유 출처 수 (같은 계정 중복 제거; 여러 계정이 다룰수록 화제)
-        authors = {(m.source, (m.author or m.id or "")) for m in members}
+        # ① 빈도 = 고유 출처 수 (같은 계정 중복 제거; 여러 계정이 다룰수록 화제).
+        #    author가 비면(스크랩 소스) post별로 쪼개지 말고 '소스' 단위로 묶는다.
+        authors = {(m.source, (m.author or "")) for m in members}
         freq = len(authors) if authors else max(1, len(t.post_ids or []))
 
         # ② 인게이지먼트 = 구성 게시물 중 '플랫폼별 백분위' 최고값 (플랫폼 스케일 차이 보정)
@@ -111,5 +117,5 @@ def score_topics(
 
     logger.info(
         f"중요도 산정 완료: {len(topics)}개 토픽 (정규화 max=1.0, "
-        f"major={sum(1 for t in topics if t.tier == 'major')}건)"
+        f"major={sum(1 for t in topics if (t.tier or '').lower() == 'major')}건)"
     )

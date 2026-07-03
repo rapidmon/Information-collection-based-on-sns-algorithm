@@ -114,16 +114,16 @@ def _posts_to_json_lite(posts: list[Post]) -> str:
     return json.dumps(items, ensure_ascii=False, indent=2)
 
 
-def _parse_json_object(text: str) -> dict[str, Any]:
-    """API 응답에서 첫 번째 '균형 잡힌' JSON 객체({...})를 추출.
+def _extract_balanced_json(text: str, open_ch: str, close_ch: str) -> str:
+    """응답에서 첫 번째 '균형 잡힌' open_ch...close_ch 스팬을 추출한다.
 
-    코드펜스나 JSON 뒤에 붙은 잡텍스트("Extra data")가 있어도 중괄호 깊이를
-    추적해 완결된 객체만 정확히 잘라낸다.
+    문자열/이스케이프를 인식하며 깊이를 추적하므로, 코드펜스나 뒤에 붙은
+    잡텍스트("Extra data")가 있어도 완결된 JSON만 정확히 잘라낸다.
     """
     text = text.strip()
-    start = text.find("{")
+    start = text.find(open_ch)
     if start == -1:
-        raise ValueError(f"JSON 객체를 찾을 수 없음: {text[:200]}")
+        raise ValueError(f"JSON({open_ch}) 없음: {text[:200]}")
 
     depth = 0
     in_str = False
@@ -140,34 +140,24 @@ def _parse_json_object(text: str) -> dict[str, Any]:
         else:
             if ch == '"':
                 in_str = True
-            elif ch == "{":
+            elif ch == open_ch:
                 depth += 1
-            elif ch == "}":
+            elif ch == close_ch:
                 depth -= 1
                 if depth == 0:
-                    return json.loads(text[start : i + 1])
-    # 닫는 괄호를 못 찾은 경우: 마지막 }까지 시도
-    return json.loads(text[start : text.rfind("}") + 1])
+                    return text[start : i + 1]
+    # 닫는 괄호를 못 찾은 경우: 마지막 close_ch까지 시도
+    return text[start : text.rfind(close_ch) + 1]
+
+
+def _parse_json_object(text: str) -> dict[str, Any]:
+    """API 응답에서 첫 번째 균형 잡힌 JSON 객체({...})를 추출."""
+    return json.loads(_extract_balanced_json(text, "{", "}"))
 
 
 def _parse_json_response(text: str) -> list[dict[str, Any]]:
-    """API 응답에서 JSON 배열을 추출 (최적화: 한 번에 처리)."""
-    text = text.strip()
-
-    # 바로 JSON인 경우 (가장 빠른 경로)
-    if text.startswith("["):
-        return json.loads(text)
-
-    # 한 번의 find/rfind로 JSON 배열 찾기
-    start = text.find("[")
-    if start == -1:
-        raise ValueError(f"JSON 배열을 찾을 수 없음: {text[:200]}")
-
-    end = text.rfind("]") + 1
-    if end <= start:
-        raise ValueError(f"JSON 배열을 찾을 수 없음: {text[:200]}")
-
-    return json.loads(text[start:end])
+    """API 응답에서 첫 번째 균형 잡힌 JSON 배열([...])을 추출."""
+    return json.loads(_extract_balanced_json(text, "[", "]"))
 
 
 class OpenAIProcessor:
@@ -193,7 +183,7 @@ class OpenAIProcessor:
         else:
             params["max_completion_tokens"] = max_tokens
         response = self._client.chat.completions.create(**params)
-        return response.choices[0].message.content
+        return response.choices[0].message.content or ""
 
     async def filter_and_summarize(self, posts: list[Post]) -> list[FilterResult]:
         """관련성 필터 + 요약 (GPT-4o-mini 사용, 배치)."""
@@ -327,7 +317,7 @@ class OpenAIProcessor:
         # 검증 필요한 주장만 필터
         claims_to_verify = [
             c for c in claims
-            if c.get("needs_verification") and c.get("claim")
+            if c.get("needs_verification") and c.get("claim") and c.get("post_id")
         ]
 
         if not claims_to_verify:
@@ -486,8 +476,8 @@ class OpenAIProcessor:
                     all_results.append(
                         MergedTopic(
                             post_ids=[p.id] if p.id else [],
-                            headline=p.summary or p.content_text[:100],
-                            body_bullets=[p.summary or p.content_text[:300]],
+                            headline=p.summary or (p.content_text or "")[:100],
+                            body_bullets=[p.summary or (p.content_text or "")[:300]],
                             primary_category=p.category_names[0] if p.category_names else "Other",
                             importance_score=p.importance_score or 0.5,
                             sources=[p.source],

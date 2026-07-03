@@ -197,7 +197,10 @@ class ClaudeCodeProcessor(OpenAIProcessor):
             logger.warning(f"주장 추출 실패(검증 스킵): {e}")
             return [VerificationResult(post_id=p.id, credibility="verified") for p in posts]
 
-        to_verify = [c for c in claims if c.get("needs_verification") and c.get("claim")]
+        to_verify = [
+            c for c in claims
+            if c.get("needs_verification") and c.get("claim") and c.get("post_id")
+        ]
         to_verify = to_verify[: self._config.verify_max_claims]  # C: 상한
         if not to_verify:
             return [VerificationResult(post_id=p.id, credibility="verified") for p in posts]
@@ -211,12 +214,15 @@ class ClaudeCodeProcessor(OpenAIProcessor):
         try:
             resp = self._call_api_with_search(VERIFY_WITH_SEARCH.format(claims_json=claims_json))
             for item in _parse_json_response(resp):
+                pid = item.get("post_id")
+                if pid is None:
+                    continue
                 results.append(VerificationResult(
-                    post_id=item["post_id"],
+                    post_id=pid,
                     credibility=item.get("credibility", "unverified"),
                     reason=item.get("reason"),
                 ))
-                verified_ids.add(item["post_id"])
+                verified_ids.add(pid)
         except Exception as e:
             logger.warning(f"Claude 웹검증 실패(스킵/통과): {e}")
 
