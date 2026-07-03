@@ -35,6 +35,7 @@ from src.infrastructure.ai.prompts import (
     TIER,
     VERIFY_CLAIMS,
 )
+from src.infrastructure.ai.topic_merger import TopicMerger
 from src.infrastructure.config.settings import ProcessingConfig
 
 logger = logging.getLogger(__name__)
@@ -162,6 +163,9 @@ def _parse_json_response(text: str) -> list[dict[str, Any]]:
 
 class OpenAIProcessor:
     """OpenAI GPT API 기반 AI 프로세서."""
+
+    # 상태 없는 순수 병합 로직 — 클래스 속성으로 공유(ClaudeCodeProcessor 서브클래스 포함)
+    _merger = TopicMerger()
 
     def __init__(self, api_key: str, config: ProcessingConfig):
         self._client = OpenAI(api_key=api_key)
@@ -549,166 +553,6 @@ class OpenAIProcessor:
         )
         return curation
 
-    _KR_SUFFIXES = re.compile(
-        r'(는|은|가|이|를|을|의|에|로|와|과|며|고|도|만|서|나|든|까지|에서|으로|하며|이며'
-        r'|했다|했으며|되었다|되었|하였다|있다|없다|이다|한다|된다|라고)$'
-    )
-
-    @classmethod
-    def _normalize_token(cls, token: str) -> str:
-        """토큰을 정규화한다 (소문자, 하이픈/공백 제거, 한국어 조사 제거)."""
-        t = token.lower().replace('-', '').replace(' ', '')
-        t = cls._KR_SUFFIXES.sub('', t)
-        return t
-
-    @staticmethod
-    def _extract_key_tokens(headline: str) -> set[str]:
-        """headline에서 핵심 토큰을 추출.
-
-        - 영문 이름+버전을 하나의 토큰으로 유지 (GPT-5.5, Claude 4.7 등)
-        - 한국어 조사 제거 후 어간만 추출
-        - 고유명사 중심 추출
-        """
-        # 1단계: 영문 이름+버전번호를 하나로 묶음
-        merged = re.findall(
-            r'[A-Za-z][A-Za-z0-9]*(?:[- ]?\d+(?:\.\d+)*)?', headline
-        )
-        # 2단계: 한국어 단어 추출 (2자 이상)
-        korean = re.findall(r'[가-힣]{2,}', headline)
-        # 3단계: 독립 숫자+단위
-        numbers = re.findall(r'\d+(?:\.\d+)?[조억만%]+', headline)
-
-        stop_kr = {"에서", "으로", "하며", "이며", "하여", "있다", "했다", "했으며",
-                   "되었", "되었다", "것으로", "대비", "전년", "동기", "기준", "기록",
-                   "증가", "감소", "상회", "초과", "보고", "달러", "원으로",
-                   "위해", "통해", "대한", "관한", "관련", "주요", "해당",
-                   "발표", "출시", "공개", "도입"}
-        stop_en = {"the", "and", "for", "with", "from", "that", "this", "are",
-                   "was", "has", "have", "been", "will", "its", "new"}
-
-        result = set()
-        for t in merged:
-            t = t.strip()
-            if len(t) >= 2 and t.lower() not in stop_en:
-                result.add(t)
-        for t in korean:
-            if t not in stop_kr:
-                result.add(t)
-        for t in numbers:
-            result.add(t)
-
-        return result
-
-    _PRODUCT_NAME_PATTERN = re.compile(r'[a-z]+\d')
-
-    @classmethod
-    def _token_similarity(cls, set_a: set[str], set_b: set[str]) -> int:
-        """두 토큰 집합의 매칭 수를 계산한다 (정규화 + 부분 문자열 매칭).
-
-        영문+숫자 조합 토큰(제품명/모델명: gpt5.5, claude4.7 등)이 일치하면
-        가중치 2로 계산하여 단일 제품명 매칭만으로도 병합 후보가 될 수 있게 한다.
-        """
-        if not set_a or not set_b:
-            return 0
-
-        norm_a = {cls._normalize_token(t): t for t in set_a}
-        norm_b = {cls._normalize_token(t): t for t in set_b}
-
-        # 정규화 후 완전 일치
-        matched_keys = set(norm_a.keys()) & set(norm_b.keys())
-        matches = 0
-        for key in matched_keys:
-            if cls._PRODUCT_NAME_PATTERN.search(key):
-                matches += 2
-            else:
-                matches += 1
-
-        # 부분 문자열 매칭 (이미 매칭된 것 제외)
-        remaining_a = {k for k in norm_a if k not in matched_keys}
-        remaining_b = {k for k in norm_b if k not in matched_keys}
-
-        for na in remaining_a:
-            if len(na) < 3:
-                continue
-            for nb in remaining_b:
-                if len(nb) < 3:
-                    continue
-                if na in nb or nb in na:
-                    matches += 1
-                    break
-
-        return matches
-
-    def _find_merge_candidates(self, topics: list[MergedTopic]) -> list[list[int]]:
-        """headline 토큰 유사도로 병합 후보군을 찾는다 (LLM 호출 없이)."""
-        token_sets = [self._extract_key_tokens(t.headline) for t in topics]
-        n = len(topics)
-        parent = list(range(n))
-
-        def find(x: int) -> int:
-            while parent[x] != x:
-                parent[x] = parent[parent[x]]
-                x = parent[x]
-            return x
-
-        def union(a: int, b: int) -> None:
-            ra, rb = find(a), find(b)
-            if ra != rb:
-                parent[ra] = rb
-
-        for i in range(n):
-            if not token_sets[i]:
-                continue
-            for j in range(i + 1, n):
-                if not token_sets[j]:
-                    continue
-                matched = self._token_similarity(token_sets[i], token_sets[j])
-                smaller = min(len(token_sets[i]), len(token_sets[j]))
-                ratio = matched / smaller if smaller > 0 else 0
-                if matched >= 2 and ratio >= 0.4:
-                    union(i, j)
-
-        groups: dict[int, list[int]] = {}
-        for i in range(n):
-            root = find(i)
-            groups.setdefault(root, []).append(i)
-
-        return [indices for indices in groups.values() if len(indices) >= 2]
-
-    @staticmethod
-    def _merge_topic_group(topics: list[MergedTopic], indices: list[int]) -> MergedTopic:
-        """토픽 인덱스 그룹을 하나의 MergedTopic으로 병합."""
-        base = topics[indices[0]]
-        combined_post_ids = []
-        combined_bullets = []
-        combined_sources = []
-        combined_urls = []
-        best_score = 0.0
-        best_headline = base.headline
-
-        for idx in indices:
-            t = topics[idx]
-            combined_post_ids.extend(t.post_ids)
-            combined_bullets.extend(t.body_bullets)
-            combined_sources.extend(t.sources)
-            combined_urls.extend(t.source_urls)
-            if t.importance_score > best_score:
-                best_score = t.importance_score
-                best_headline = t.headline
-
-        combined_sources = list(dict.fromkeys(combined_sources))
-        combined_urls = list(dict.fromkeys(combined_urls))
-
-        return MergedTopic(
-            post_ids=combined_post_ids,
-            headline=best_headline,
-            body_bullets=combined_bullets,
-            primary_category=base.primary_category,
-            importance_score=best_score,
-            sources=combined_sources,
-            source_urls=combined_urls,
-        )
-
     async def _consolidate_topics(self, topics: list[MergedTopic]) -> list[MergedTopic]:
         """최종 전역 통합. 토픽 수가 적당하면 전체를 LLM에 한 번에 보내 의미 기반 병합,
         너무 많으면 토큰 유사도 기반(_cross_chunk_merge) 폴백."""
@@ -753,7 +597,7 @@ class OpenAIProcessor:
             ]
             if len(idxs) < 2:
                 continue
-            merged = self._merge_topic_group(topics, idxs)
+            merged = self._merger.merge_topic_group(topics, idxs)
             if g.get("headline"):
                 merged.headline = g["headline"]
             # LLM이 종합한 간결한 세부(≤3)가 있으면 채택(단순 이어붙이기 대체)
@@ -778,7 +622,7 @@ class OpenAIProcessor:
         1단계: headline 토큰 유사도로 후보군 탐색 (빠르고 확실한 매칭)
         2단계: 후보군 내에서 LLM으로 최종 병합 판정 (의미 기반 검증)
         """
-        candidate_groups = self._find_merge_candidates(topics)
+        candidate_groups = self._merger.find_merge_candidates(topics)
 
         if not candidate_groups:
             logger.info("2차 청크 간 병합: 병합 후보 없음")
@@ -791,7 +635,7 @@ class OpenAIProcessor:
 
         for group_indices in candidate_groups:
             if len(group_indices) <= 3:
-                merged_topics.append(self._merge_topic_group(topics, group_indices))
+                merged_topics.append(self._merger.merge_topic_group(topics, group_indices))
                 merged_indices.update(group_indices)
                 continue
 
@@ -821,7 +665,7 @@ class OpenAIProcessor:
                     for sg in sub_groups:
                         sg_indices = [i for i in sg.get("merge_indices", []) if 0 <= i < len(topics)]
                         if len(sg_indices) >= 2:
-                            result = self._merge_topic_group(topics, sg_indices)
+                            result = self._merger.merge_topic_group(topics, sg_indices)
                             if sg.get("headline"):
                                 result.headline = sg["headline"]
                             merged_topics.append(result)
@@ -831,12 +675,12 @@ class OpenAIProcessor:
                         if idx not in sub_merged:
                             pass  # 아래 병합되지 않은 토픽 유지에서 처리
                 else:
-                    merged_topics.append(self._merge_topic_group(topics, group_indices))
+                    merged_topics.append(self._merger.merge_topic_group(topics, group_indices))
                     merged_indices.update(group_indices)
 
             except Exception as e:
                 logger.warning(f"후보군 LLM 검증 실패, 토큰 매칭 기준으로 병합: {e}")
-                merged_topics.append(self._merge_topic_group(topics, group_indices))
+                merged_topics.append(self._merger.merge_topic_group(topics, group_indices))
                 merged_indices.update(group_indices)
 
         for i, t in enumerate(topics):
