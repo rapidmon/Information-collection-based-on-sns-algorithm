@@ -100,6 +100,35 @@ def init_sqlite_db() -> None:
     conn.commit()
 
 
+# 재수집 시 처리 상태(is_relevant·summary·category·briefed_at·liked_at 등)를 보존하는 UPSERT.
+# 과거 INSERT OR REPLACE는 같은 게시물을 재수집할 때 행을 통째로 덮어써 처리상태를 NULL로
+# 리셋했고, 그 결과 이미 처리한 글이 매 사이클 재필터링(토큰 낭비)·재브리핑·재추천됐다.
+# 충돌(=이미 존재) 시엔 인게이지먼트/본문/collected_at만 갱신하고 처리·상태 필드는 건드리지 않는다.
+# (liked_at은 INSERT 컬럼에 없어 신규행에선 기본 NULL, 기존행에선 보존된다.)
+_UPSERT_SQL = """
+    INSERT INTO posts
+    (id, source, external_id, url, author, author_url, content_text,
+     content_html, media_urls, engagement_likes, engagement_reposts,
+     engagement_comments, engagement_views, published_at, collected_at,
+     summary, importance_score, language, is_relevant, category_names,
+     keywords, briefed_at, content_hash, dedup_cluster_id, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(id) DO UPDATE SET
+        url=excluded.url,
+        author=excluded.author,
+        author_url=excluded.author_url,
+        content_text=excluded.content_text,
+        content_html=excluded.content_html,
+        media_urls=excluded.media_urls,
+        engagement_likes=excluded.engagement_likes,
+        engagement_reposts=excluded.engagement_reposts,
+        engagement_comments=excluded.engagement_comments,
+        engagement_views=excluded.engagement_views,
+        collected_at=excluded.collected_at,
+        updated_at=CURRENT_TIMESTAMP
+"""
+
+
 def _post_to_dict(post: Post) -> dict[str, Any]:
     """Post 엔티티를 SQLite 저장용 딕셔너리로 변환."""
     import json
@@ -200,15 +229,7 @@ class PostRepositorySQLite:
         cursor = conn.cursor()
         data = _post_to_dict(post)
 
-        cursor.execute("""
-            INSERT OR REPLACE INTO posts
-            (id, source, external_id, url, author, author_url, content_text,
-             content_html, media_urls, engagement_likes, engagement_reposts,
-             engagement_comments, engagement_views, published_at, collected_at,
-             summary, importance_score, language, is_relevant, category_names,
-             keywords, briefed_at, content_hash, dedup_cluster_id, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-        """, tuple(data.values()))
+        cursor.execute(_UPSERT_SQL, tuple(data.values()))
         conn.commit()
         return data["id"]
 
@@ -313,15 +334,7 @@ class PostRepositorySQLite:
 
         for post in posts:
             data = _post_to_dict(post)
-            cursor.execute("""
-                INSERT OR REPLACE INTO posts
-                (id, source, external_id, url, author, author_url, content_text,
-                 content_html, media_urls, engagement_likes, engagement_reposts,
-                 engagement_comments, engagement_views, published_at, collected_at,
-                 summary, importance_score, language, is_relevant, category_names,
-                 keywords, briefed_at, content_hash, dedup_cluster_id, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            """, tuple(data.values()))
+            cursor.execute(_UPSERT_SQL, tuple(data.values()))
             saved += 1
 
         conn.commit()
