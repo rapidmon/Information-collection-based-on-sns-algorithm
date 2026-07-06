@@ -88,21 +88,31 @@ def score_topics(
             pct = _percentile(pmaps.get(m.source, []), _engagement_raw(m, cfg))
             eng = max(eng, pct)
 
-        # ③ 티어 보정 (LLM 절대 등급)
+        # ③ 카테고리별 점수 축 분기 (뉴스가치 vs 흥미로운 결과물).
+        #    - 뉴스 카테고리: LLM 절대 등급(tier)으로 보정 → 여러 출처에 반복될수록↑.
+        #    - Showcase 등(category_base 지정): 뉴스 티어가 무의미(1인 결과물 자랑)하므로
+        #      티어 대신 카테고리 기본 가중을 주고 인게이지먼트로 변별한다.
+        cat = t.primary_category or ""
         tier = (t.tier or "minor").lower()
-        tier_bonus = cfg.tier_bonus.get(tier, 0.0)
+        if cat in cfg.category_base:
+            base_comp = cfg.category_base[cat]  # 티어 대체(카테고리 축)
+            axis = f"category:{cat}"
+        else:
+            base_comp = cfg.tier_bonus.get(tier, 0.0)  # 뉴스 티어 축
+            axis = "tier"
 
         freq_comp = cfg.freq_weight * freq
         eng_comp = cfg.engagement_weight * eng
-        raw = freq_comp + eng_comp + tier_bonus
+        raw = freq_comp + eng_comp + base_comp
 
         t.score_features = {
             "frequency": freq,
             "engagement_pct": round(eng, 3),
             "tier": tier,
+            "axis": axis,
             "freq_comp": round(freq_comp, 4),
             "eng_comp": round(eng_comp, 4),
-            "tier_comp": round(tier_bonus, 4),
+            "tier_comp": round(base_comp, 4),
             "raw": round(raw, 4),
         }
         raws.append(raw)

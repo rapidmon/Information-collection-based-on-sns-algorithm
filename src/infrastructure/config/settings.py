@@ -154,6 +154,10 @@ class ScoringConfig:
         self.w_likes: float = data.get("w_likes", 1.0)
         self.w_reposts: float = data.get("w_reposts", 2.0)
         self.w_comments: float = data.get("w_comments", 1.5)
+        # 카테고리별 점수 축 분기: 뉴스 카테고리는 LLM 티어(절대 뉴스가치)로 보정하지만,
+        # 아래 카테고리는 '뉴스가치'가 아니라 '흥미로운 결과물' 축이라 티어 대신 카테고리
+        # 기본 가중(base)을 적용하고 인게이지먼트로 변별한다. (base는 notable~major 사이)
+        self.category_base: dict[str, float] = data.get("category_base", {"Showcase": 0.55})
 
 
 class WebConfig:

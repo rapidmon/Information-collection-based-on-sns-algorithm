@@ -99,7 +99,7 @@ briefing:
   max_items: 50
   include_stats: true
   min_importance: 0.5       # 정규화(최고=1.0) 점수 하한 — 그날 최고 대비 50% 미만 항목 제거
-  max_per_category: 8       # 카테고리별 최대 항목 수 (한 카테고리 과다 방지)
+  max_per_category: 6       # 카테고리별 최대 항목 수 (한 카테고리 과다 방지)
 
 # 브리핑 중요도 산정 (객관 신호 + LLM 티어 보정, 정규화 max=1.0)
 #  최종 = freq_weight×고유출처수 + engagement_weight×인게이지먼트백분위 + tier_bonus[tier]
@@ -114,6 +114,9 @@ scoring:
   w_likes: 1.0              # 인게이지먼트 원점수 가중
   w_reposts: 2.0
   w_comments: 1.5
+  category_base:            # 카테고리별 점수 축 분기: 뉴스 티어가 무의미한 카테고리는
+    Showcase: 0.55          # 티어 대신 이 기본 가중(notable~major 사이)+인게이지먼트로 채점
+
 
 email:
   enabled: true

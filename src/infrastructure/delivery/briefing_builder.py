@@ -56,6 +56,8 @@ class DefaultBriefingGenerator:
         merged_topics.sort(key=lambda t: t.importance_score, reverse=True)
 
         # 병합 후 최종 점수 하한 (재산정된 저중요도 토픽 제거). 전부 잘리면 원본 유지.
+        # 카테고리별 점수 축(뉴스 티어 vs 쇼케이스 흥미도)은 importance_scorer가 이미
+        # 반영하므로 여기서는 단순 하한 컷만 한다.
         min_imp = self._config.min_importance
         filtered = [t for t in merged_topics if (t.importance_score or 0) >= min_imp]
         if filtered:
