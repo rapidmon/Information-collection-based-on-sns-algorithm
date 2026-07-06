@@ -198,13 +198,15 @@ class BaseLLMProcessor:
                     )
             except Exception as e:
                 logger.error(f"필터/요약 API 호출 실패: {e}")
-                # 실패 시 모든 게시물을 관련으로 표시 (안전 기본값)
+                # 실패 시 비관련으로 컷(요약 없음). 과거엔 '전부 관련'으로 통과시켰으나,
+                # 한도/파싱 실패 시 원문 쓰레기가 브리핑 풀에 쏟아져 품질이 붕괴됐다.
+                # 진행은 계속하되(큐 스톨 방지) 미검증 원문은 발행 대상에서 제외한다.
                 for p in batch:
                     results.append(
                         FilterResult(
                             post_id=p.id,
-                            is_relevant=True,
-                            summary=p.content_text[:200],
+                            is_relevant=False,
+                            summary=None,
                             language="unknown",
                         )
                     )

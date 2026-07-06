@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from zoneinfo import ZoneInfo
+
 from src.domain.entities import Category
 from src.application.use_cases.collect_posts import CollectPostsUseCase
 from src.application.use_cases.generate_briefing import GenerateBriefingUseCase
@@ -171,7 +173,14 @@ class Container:
             ))
 
         d = briefing.period_end or briefing.generated_at
-        date_str = d.strftime("%Y. %m. %d") if hasattr(d, "strftime") else str(d)[:10]
+        # Firestore는 datetime을 UTC로 저장/복원한다. 08:00 KST는 전날 23:00 UTC라
+        # 변환 없이 strftime하면 하루 밀린다 → 표시 전 반드시 KST로 환산.
+        if hasattr(d, "strftime"):
+            if getattr(d, "tzinfo", None) is not None:
+                d = d.astimezone(ZoneInfo("Asia/Seoul"))
+            date_str = d.strftime("%Y. %m. %d")
+        else:
+            date_str = str(d)[:10]
         subject = f"[{ecfg.subject_prefix}] {date_str}"
 
         # 독자층 지정이 있으면 그룹별, 없으면 to_addresses로 단일(중립) 발송
