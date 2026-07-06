@@ -7,14 +7,14 @@ collection:
   twitter:
     enabled: true
     interval_minutes: 10
-    scroll_rounds: 8
+    scroll_rounds: 5          # 필터 호출당 브리핑 산출 최저(0.14)라 감축. baseline은 여전히 충분
     scroll_delay_min: 2.0
     scroll_delay_max: 4.0
     use_graphql_interception: true
   threads:
     enabled: true
     interval_minutes: 10
-    scroll_rounds: 6
+    scroll_rounds: 3          # 전체 필터의 57%·관련도 7.7%라 볼륨을 절반으로 (토큰 절감)
     scroll_delay_min: 2.5
     scroll_delay_max: 5.0
   linkedin:
@@ -79,8 +79,8 @@ processing:
   claude_timeout: 600
   model_filter: "gpt-4o-mini"         # ai_backend=openai 일 때만 사용
   model_process: "gpt-5-mini"         # ai_backend=openai 일 때만 사용
-  batch_size_filter: 20
-  batch_size_categorize: 20
+  batch_size_filter: 40        # 호출당 ~28k CLI 오버헤드가 고정이라 배치를 키워 호출 수를 절반으로
+  batch_size_categorize: 40
   dedup_chunk_size: 30
   processing_interval_minutes: 30
   min_posts_to_process: 10

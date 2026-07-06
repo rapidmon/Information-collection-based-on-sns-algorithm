@@ -147,7 +147,7 @@ class ClaudeCodeProcessor(BaseLLMProcessor):
             args += ["--model", claude_model]
         return self._run_claude(args, prompt, label="claude CLI")
 
-    def _call_api_with_search(self, prompt: str, max_turns: int = 15) -> str:
+    def _call_api_with_search(self, prompt: str, max_turns: int = 6) -> str:
         """WebSearch 도구를 허용해 Claude가 직접 웹을 검색하며 응답하게 한다(구독, API 키 X)."""
         args = [
             "-p", "--output-format", "json",

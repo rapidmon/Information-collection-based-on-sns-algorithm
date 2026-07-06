@@ -73,18 +73,20 @@ class LinkedInCollector(BaseCdpCollector):
                 posts: list[Post] = []
                 seen_ids: set[str] = set()
 
-                for round_num in range(self._config.scroll_rounds):
-                    # 새 DOM: mainFeed 안의 포스트 항목들
-                    feed_items = await self._get_feed_items(page)
-
-                    for item in feed_items:
+                async def _collect_current() -> None:
+                    for item in await self._get_feed_items(page):
                         post = await self._parse_feed_update(item, page)
                         if post and post.external_id not in seen_ids:
                             seen_ids.add(post.external_id)
                             posts.append(post)
 
-                    scroll_amount = random.randint(800, 1500)
-                    await page.evaluate(f"window.scrollBy(0, {scroll_amount})")
+                for round_num in range(self._config.scroll_rounds):
+                    # 현재 DOM에 붙은 게시물부터 수집
+                    await _collect_current()
+
+                    # 피드는 window가 아니라 내부 스크롤러(MAIN)를 내려야 하고, 다음 글은
+                    # 스크롤 lazy-load가 아니라 '더 로드' 버튼 클릭으로 append된다.
+                    await self._scroll_and_load_more(page)
                     await asyncio.sleep(
                         random.uniform(self._config.scroll_delay_min, self._config.scroll_delay_max)
                     )
@@ -94,11 +96,55 @@ class LinkedInCollector(BaseCdpCollector):
                             random.randint(100, 800), random.randint(100, 600)
                         )
 
+                # 마지막 '더 로드'로 붙은 글까지 마저 수집
+                await _collect_current()
+
                 logger.info(f"[linkedin] {len(posts)}건 수집 완료")
                 return posts
 
             finally:
                 await page.close()  # 탭 닫아 렌더러 메모리 회수 (누수·먹통 방지)
+
+    async def _scroll_and_load_more(self, page) -> None:
+        """내부 피드 스크롤러를 바닥까지 내리고 '더 로드'(load more) 버튼을 클릭한다.
+
+        LinkedIn 피드는 document가 아니라 가장 큰 오버플로 컨테이너(MAIN)가 스크롤되며,
+        다음 게시물은 스크롤 lazy-load가 아니라 '더 로드' 버튼 클릭으로만 append된다.
+        (라이브 검증: 이 방식으로 children 8→58까지 증가. 스크롤만으론 8에서 정지.)
+        '더보기'(see more, 본문 펼치기)도 함께 눌러 파싱 시 전체 본문을 확보한다.
+        """
+        try:
+            await page.evaluate(
+                """() => {
+                    // 1) 가장 큰 오버플로 스크롤러(=피드 MAIN)를 바닥으로
+                    let best = null, bestSH = 0;
+                    for (const el of document.querySelectorAll('main, div')) {
+                        if (el.scrollHeight > el.clientHeight + 200 && el.clientHeight > 300
+                            && el.scrollHeight > bestSH) { best = el; bestSH = el.scrollHeight; }
+                    }
+                    const sc = best || document.scrollingElement;
+                    sc.scrollTop = sc.scrollHeight;
+
+                    // 2) 'see more'(본문 펼치기)만 클릭 — 전체 본문 확보 (load more와 구분)
+                    for (const b of document.querySelectorAll('button')) {
+                        const s = ((b.innerText||'') + ' ' + (b.getAttribute('aria-label')||'')).trim();
+                        if (/더보기|see more/i.test(s) && !/더 ?로드|load more/i.test(s)) {
+                            try { b.click(); } catch (e) {}
+                        }
+                    }
+                    // 3) 'load more'(더 로드) 클릭 — 다음 게시물 로드
+                    for (const b of document.querySelectorAll('button')) {
+                        const s = ((b.innerText||'') + ' ' + (b.getAttribute('aria-label')||'')).trim();
+                        if (/더 ?로드|load more|결과 더 ?보기|show more results/i.test(s)) {
+                            b.scrollIntoView({block: 'center'});
+                            b.click();
+                            break;
+                        }
+                    }
+                }"""
+            )
+        except Exception as e:
+            logger.debug(f"[linkedin] 스크롤/더 로드 클릭 실패: {e}")
 
     async def _get_feed_items(self, page) -> list:
         """피드에서 실제 게시물 항목만 추출한다."""
