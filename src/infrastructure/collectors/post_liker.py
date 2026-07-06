@@ -47,6 +47,19 @@ _LIKE_SELECTORS = {
 }
 
 
+def _is_likeable_url(source: str, url: str) -> bool:
+    """추천은 개별 게시물 페이지에서만 가능하다.
+
+    LinkedIn은 게시물 URN 추출이 실패하면 프로필(/in/)·회사(/company/) URL로
+    폴백되는데, 그 페이지엔 해당 게시물의 추천 버튼이 없어 goto 20초 타임아웃만
+    유발한다 → 개별 게시물 URL(feed/update/urn:li:*)만 시도한다.
+    """
+    url = url or ""
+    if source == "linkedin":
+        return "/feed/update/urn:li:" in url
+    return url.startswith(("http://", "https://"))
+
+
 async def _get_like_state(page, source: str):
     """현재 페이지 메인 게시물의 좋아요 상태를 HTML 태그로 판정.
 
@@ -130,6 +143,10 @@ class CdpPostLiker:
 
     async def _like_one(self, page, source: str, post: Post) -> bool:
         snippet = (post.summary or post.content_text or "")[:60].replace("\n", " ")
+        # 개별 게시물 URL이 아니면(프로필/회사 폴백 등) goto 타임아웃만 나므로 깔끔히 스킵
+        if not _is_likeable_url(source, post.url):
+            logger.info(f"[{source}][like] 개별 게시물 URL 아님 — 스킵 | {snippet}")
+            return False
         try:
             await page.goto(post.url, wait_until="domcontentloaded", timeout=20000)
 

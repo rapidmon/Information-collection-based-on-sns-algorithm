@@ -87,7 +87,7 @@ processing:
 
 like:
   enabled: true            # 자동 좋아요 사용 여부
-  dry_run: true            # true면 실제로 누르지 않고 버튼 확인 후 "좋아요 대상"만 로그
+  dry_run: false           # false면 실제 추천 클릭. (개별 게시물 URL만 시도 — 프로필/회사 URL은 스킵)
   max_per_run: 10          # 1회(플랫폼당) 최대 좋아요 수
   min_importance: 0.7      # AI 중요도 이 값 이상인 관련 게시물만 좋아요
   delay_min: 2.0           # 좋아요 사이 최소 대기(초)
