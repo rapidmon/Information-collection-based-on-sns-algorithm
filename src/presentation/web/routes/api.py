@@ -135,6 +135,16 @@ async def trigger_briefing(request: Request):
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
+@router.post("/slack/vote/trigger")
+async def trigger_slack_vote(request: Request):
+    """슬랙 투표 집계 → 1위 항목 심층 글 게시 수동 트리거."""
+    c = _get_container(request)
+    try:
+        return await c.run_slack_vote_winner()
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
 @router.get("/briefings/latest")
 async def latest_briefing(request: Request):
     """최신 브리핑 JSON."""

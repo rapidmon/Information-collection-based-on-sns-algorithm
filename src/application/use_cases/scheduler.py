@@ -100,6 +100,20 @@ class Orchestrator:
         )
         logger.info(f"일일 브리핑 등록: {daily_time}")
 
+        # ─── 슬랙 투표 마감 → 1위 항목 심층 글 게시 ───
+        scfg = self._c.config.slack
+        if scfg.enabled and scfg.winner_prompt.strip():
+            v_hour, v_minute = map(int, scfg.vote_close_time.split(":"))
+            self.scheduler.add_job(
+                self._run_slack_vote_winner,
+                trigger=CronTrigger(hour=v_hour, minute=v_minute),
+                id="slack_vote_winner",
+                name="Slack Vote Winner",
+                max_instances=1,
+                misfire_grace_time=600,
+            )
+            logger.info(f"슬랙 투표 집계 등록: {scfg.vote_close_time}")
+
         # ─── 헬스체크 (5분마다) ───
         self.scheduler.add_job(
             self._health_check,
@@ -215,6 +229,14 @@ class Orchestrator:
         except Exception as e:
             logger.error(f"[scheduler] 일일 브리핑 오류: {e}")
 
+    async def _run_slack_vote_winner(self) -> None:
+        logger.info("[scheduler] 슬랙 투표 집계 시작")
+        try:
+            result = await self._c.run_slack_vote_winner()
+            logger.info(f"[scheduler] 슬랙 투표 1위 처리: {result}")
+        except Exception as e:
+            logger.error(f"[scheduler] 슬랙 투표 처리 오류: {e}")
+
     async def _health_check(self) -> None:
         """각 소스의 연속 실패 횟수를 확인하고 임계치 초과 시 알림. RSS도 함께 로깅."""
         self._log_memory_usage()
@@ -255,9 +277,17 @@ class Orchestrator:
             logger.warning(f"[health] 메모리 측정 실패: {e}")
 
     async def _cleanup_old_posts(self) -> None:
-        """1개월 이상 된 포스트 자동 삭제 (로컬 SQLite 정리)."""
-        logger.info("[scheduler] 데이터 정리 시작 (1개월 이상 데이터 삭제)")
+        """포스트 자동 삭제 (로컬 SQLite 정리).
+
+        - 필터 탈락(비관련) 글: 3일간 재수집 안 됐으면 삭제
+          (수집 컷오프 max_age_days=2를 넘겨야 삭제→재수집→재필터링 루프가 없다)
+        - 그 외: 30일 경과 시 삭제
+        """
+        logger.info("[scheduler] 데이터 정리 시작 (비관련 3일 / 전체 30일)")
         try:
+            irrelevant_deleted = self._c.post_repo.delete_irrelevant_older_than(days=3)
+            if irrelevant_deleted:
+                logger.info(f"[scheduler] 필터 탈락 게시물 정리: {irrelevant_deleted}건 삭제")
             deleted_count = self._c.post_repo.delete_older_than(days=30)
             storage_info = self._c.post_repo.get_storage_info()
             logger.info(

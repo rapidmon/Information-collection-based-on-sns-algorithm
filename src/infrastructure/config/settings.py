@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     firebase_credential_path: str = "firebase-service-account.json"
     firebase_project_id: str = ""
 
+    # Slack 브리핑 발송용 Bot Token (xoxb-...). 필요 스코프: chat:write, reactions:write
+    slack_bot_token: str = ""
+
     # SNS Credentials (auto-login)
     twitter_username: str = ""
     twitter_password: str = ""
@@ -80,12 +83,13 @@ class CategoryConfig:
 
 
 class ProcessingConfig:
+    """AI 백엔드는 하이브리드 고정 — OpenAI(고빈도 배치) + Claude(발행 작문·큐레이션)."""
+
     def __init__(self, data: dict[str, Any]):
-        # AI 백엔드 선택: "openai"(API 키) 또는 "claude_code"(claude CLI, 구독)
-        self.ai_backend: str = data.get("ai_backend", "openai")
+        # OpenAI 모델: 필터/분류/검증(model_filter), 작문 폴백(model_process)
         self.model_filter: str = data.get("model_filter", "gpt-4o-mini")
         self.model_process: str = data.get("model_process", "gpt-4o")
-        # claude_code 백엔드용 모델 (Claude 모델 ID)
+        # Claude 모델 (발행 작문·큐레이션용)
         self.claude_model_filter: str = data.get("claude_model_filter", "claude-haiku-4-5")
         self.claude_model_process: str = data.get("claude_model_process", "claude-sonnet-4-6")
         self.claude_timeout: int = data.get("claude_timeout", 300)
@@ -137,16 +141,42 @@ class EmailConfig:
         self.subject_prefix: str = data.get("subject_prefix", "Morning Commit")
 
 
-class ScoringConfig:
-    """브리핑 중요도 산정 가중치 (객관 신호 + LLM 티어 보정).
+class SlackConfig:
+    """슬랙 브리핑 발송 설정.
 
-    최종 점수 = freq_weight*고유출처수 + engagement_weight*인게이지먼트백분위 + tier_bonus[tier]
-    를 그날 최고점이 1.0이 되도록 정규화. 피드백 학습으로 이 가중치를 조정한다.
+    헤더 메시지 1개 + 항목별 스레드 댓글로 게시하고, 각 항목에 투표용
+    이모지 리액션을 선부착한다. 토큰은 .env의 SLACK_BOT_TOKEN.
+    """
+
+    def __init__(self, data: dict[str, Any]):
+        self.enabled: bool = data.get("enabled", False)
+        # 채널명("#tech-briefing") 또는 채널 ID("C0123..."). 봇이 초대돼 있어야 함.
+        self.channel: str = data.get("channel", "")
+        # 각 항목에 선부착할 리액션 이모지 이름 (콜론 없이). [0]=찬성, [1]=반대로 집계.
+        self.reactions: list[str] = data.get("reactions", ["+1", "-1"])
+        # ─ 투표 집계 → 1위 항목 심층 글 생성 ─
+        # 집계 실행 시각 (HH:MM). winner_prompt가 비어 있으면 기능 전체 비활성.
+        self.vote_close_time: str = data.get("vote_close_time", "12:00")
+        # 1위 항목에 돌릴 프롬프트 템플릿. 플레이스홀더:
+        #   {headline} {bullets} {category} {sources} {posts} {date}
+        self.winner_prompt: str = data.get("winner_prompt", "")
+        # 프롬프트 실행 시 Claude WebSearch 허용 여부
+        self.winner_websearch: bool = data.get("winner_websearch", True)
+        # 게시된 항목 ts↔항목 매핑 저장 파일 (집계 잡이 읽음, 매일 덮어씀)
+        self.state_path: str = data.get("state_path", "data/slack_briefing_state.json")
+
+
+class ScoringConfig:
+    """브리핑 중요도 산정 가중치.
+
+    게시물 점수 = (1 - engagement_weight)*AI중요도 + engagement_weight*인게이지먼트백분위.
+    병합된 사건은 카테고리별 구성 게시물 점수의 top-3 평균으로 평가하고,
+    카테고리 안에서만 상대 정규화한다.
     """
 
     def __init__(self, data: dict[str, Any]):
         self.freq_weight: float = data.get("freq_weight", 0.05)
-        self.engagement_weight: float = data.get("engagement_weight", 0.4)
+        self.engagement_weight: float = data.get("engagement_weight", 0.2)
         self.tier_bonus: dict[str, float] = data.get(
             "tier_bonus", {"major": 1.0, "notable": 0.4, "minor": 0.0}
         )
@@ -154,10 +184,8 @@ class ScoringConfig:
         self.w_likes: float = data.get("w_likes", 1.0)
         self.w_reposts: float = data.get("w_reposts", 2.0)
         self.w_comments: float = data.get("w_comments", 1.5)
-        # 카테고리별 점수 축 분기: 뉴스 카테고리는 LLM 티어(절대 뉴스가치)로 보정하지만,
-        # 아래 카테고리는 '뉴스가치'가 아니라 '흥미로운 결과물' 축이라 티어 대신 카테고리
-        # 기본 가중(base)을 적용하고 인게이지먼트로 변별한다. (base는 notable~major 사이)
-        self.category_base: dict[str, float] = data.get("category_base", {"Showcase": 0.55})
+        # Deprecated. 카테고리 간 base 보정 대신 score_topics()에서 카테고리별 상대평가를 한다.
+        self.category_base: dict[str, float] = data.get("category_base", {})
 
 
 class WebConfig:
@@ -193,6 +221,7 @@ class AppConfig:
         self.briefing = BriefingConfig(data.get("briefing", {}))
         self.scoring = ScoringConfig(data.get("scoring", {}))
         self.email = EmailConfig(data.get("email", {}))
+        self.slack = SlackConfig(data.get("slack", {}))
         self.web = WebConfig(data.get("web", {}))
 
 

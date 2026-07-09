@@ -1,4 +1,4 @@
-app:
+﻿app:
   name: "SNS Tech Briefing"
   timezone: "Asia/Seoul"
 
@@ -6,20 +6,20 @@ collection:
   max_age_days: 2  # 게시일 N일 초과 게시물은 수집 단계에서 제외
   twitter:
     enabled: true
-    interval_minutes: 10
+    interval_minutes: 20
     scroll_rounds: 5          # 필터 호출당 브리핑 산출 최저(0.14)라 감축. baseline은 여전히 충분
     scroll_delay_min: 2.0
     scroll_delay_max: 4.0
     use_graphql_interception: true
   threads:
     enabled: true
-    interval_minutes: 10
+    interval_minutes: 20
     scroll_rounds: 3          # 전체 필터의 57%·관련도 7.7%라 볼륨을 절반으로 (토큰 절감)
     scroll_delay_min: 2.5
     scroll_delay_max: 5.0
   linkedin:
     enabled: true
-    interval_minutes: 10
+    interval_minutes: 20
     scroll_rounds: 8
     scroll_delay_min: 3.0
     scroll_delay_max: 7.0
@@ -73,16 +73,16 @@ categories:
     keywords: ["쇼케이스", "showcase", "만들었", "출시", "런칭", "launch", "데모", "demo", "사이드프로젝트", "side project", "바이브코딩", "vibe coding", "Product Hunt", "v0", "Lovable", "Bolt", "made with", "built with"]
 
 processing:
-  ai_backend: "claude_code"           # "claude_code"(구독, API 키 불필요) 또는 "openai"(API 키)
-  claude_model_filter: "claude-haiku-4-5"    # 필터/분류/검증용 (빠르고 저렴)
-  claude_model_process: "claude-sonnet-4-6"  # 중복제거/통합용 (정교함). 절약하려면 haiku로
+  # AI 백엔드는 하이브리드 고정: 필터·분류·검증=OpenAI / 발행작문·큐레이션=Claude
+  claude_model_filter: "claude-haiku-4-5"    # Claude 폴백/보조용 (CLI 모델 매핑)
+  claude_model_process: "claude-sonnet-4-6"  # 발행 확정분 작문 + 독자군 큐레이션
   claude_timeout: 600
-  model_filter: "gpt-4o-mini"         # ai_backend=openai 일 때만 사용
-  model_process: "gpt-5-mini"         # ai_backend=openai 일 때만 사용
-  batch_size_filter: 40        # 호출당 ~28k CLI 오버헤드가 고정이라 배치를 키워 호출 수를 절반으로
+  model_filter: "gpt-5-mini"          # OpenAI: 필터/분류/검증 (고빈도 배치, 추론 모델)
+  model_process: "gpt-5-mini"         # OpenAI: 작문·큐레이션 폴백 (Claude 실패 시)
+  batch_size_filter: 40
   batch_size_categorize: 40
-  dedup_chunk_size: 30
-  processing_interval_minutes: 30
+  dedup_chunk_size: 30         # 미사용 (결정적 클러스터링은 청크 개념 없음)
+  processing_interval_minutes: 60  # 1시간 모아서 처리 — 배치가 꽉 차 템플릿 반복 비용 감소
   min_posts_to_process: 10
 
 like:
@@ -96,26 +96,83 @@ like:
 
 briefing:
   daily_time: "08:00"
-  max_items: 50
+  max_items: 0
   include_stats: true
-  min_importance: 0.5       # 정규화(최고=1.0) 점수 하한 — 그날 최고 대비 50% 미만 항목 제거
+  min_importance: 0.85      # 카테고리별 상대 점수 하한 — 각 카테고리 최고 대비 85% 이상만 포함
   max_per_category: 6       # 카테고리별 최대 항목 수 (한 카테고리 과다 방지)
 
-# 브리핑 중요도 산정 (객관 신호 + LLM 티어 보정, 정규화 max=1.0)
-#  최종 = freq_weight×고유출처수 + engagement_weight×인게이지먼트백분위 + tier_bonus[tier]
-#  ※ 사용자 피드백(적절/과대/과소)이 쌓이면 이 가중치를 조정해 캘리브레이션
+# 브리핑 중요도 산정 (게시물 AI 중요도 + 인게이지먼트 보조 신호, 카테고리별 정규화 max=1.0)
+#  게시물 점수 = (1 - engagement_weight)×AI중요도 + engagement_weight×인게이지먼트백분위
+#  병합된 사건은 카테고리별 구성 게시물 점수의 top-3 평균으로 평가하고 대표 카테고리 하나로만 노출
 scoring:
-  freq_weight: 0.05         # 고유 출처(계정) 1개당 가점
-  engagement_weight: 0.4    # 인게이지먼트 플랫폼별 백분위(0~1)에 곱
-  tier_bonus:               # LLM 절대 등급 보정 (조용해도 큰 사건을 끌어올림)
+  freq_weight: 0.05         # deprecated: 현재 브리핑 점수에는 사용하지 않음
+  engagement_weight: 0.2    # 게시물 점수에서 인게이지먼트가 차지하는 비율(0~1)
+  tier_bonus:               # deprecated: 현재 브리핑 점수에는 사용하지 않음
     major: 1.0
     notable: 0.4
     minor: 0.0
   w_likes: 1.0              # 인게이지먼트 원점수 가중
   w_reposts: 2.0
   w_comments: 1.5
-  category_base:            # 카테고리별 점수 축 분기: 뉴스 티어가 무의미한 카테고리는
-    Showcase: 0.55          # 티어 대신 이 기본 가중(notable~major 사이)+인게이지먼트로 채점
+  category_base: {}         # 사용하지 않음: 카테고리 간 base 보정 대신 카테고리별 상대평가
+
+
+# 슬랙 브리핑 게시 — 헤더 1개 + 항목별 스레드 댓글, 댓글마다 투표 리액션(👍/👎) 선부착
+# 토큰은 .env의 SLACK_BOT_TOKEN (봇 스코프: chat:write, reactions:write / 채널에 봇 초대 필요)
+slack:
+  enabled: true
+  channel: "#디지랩-담당자-소통용"   # 채널명 또는 채널 ID("C0123...")
+  reactions: ["+1", "-1"]     # 선부착할 리액션 이모지 이름 (콜론 없이). [0]=찬성, [1]=반대
+  # ─ 투표 마감 → 1위 항목 카드뉴스 타이틀 게시 ─
+  vote_close_time: "12:00"    # 집계 실행 시각 (HH:MM)
+  winner_websearch: false     # 프롬프트가 '입력된 정보 안에서만' 조건이라 웹검색 불필요
+  # 1위 항목에 돌릴 프롬프트. ★비워두면 투표 집계 기능 전체가 꺼짐★
+  # 플레이스홀더: {headline} {bullets} {category} {sources} {posts} {date}
+  winner_prompt: |
+    아래 AI 뉴스 게시물로 인스타 카드뉴스 1장 타이틀을 만들어줘.
+
+    타겟은 AI 툴을 실무에 쓰는 미디어·크리에이티브 직군이야.
+    개발자, 디자이너, 마케터, 데이터 엔지니어, PD, 기자 등이 포함돼.
+
+    핵심 판단 기준:
+    - 이 뉴스에서 "무엇이 가능해졌는가/무엇이 달라졌는가"를 먼저 찾고, 가장 중요한 변화 1개만 타이틀에 담는다.
+    - 건조한 보도자료 톤이 아니라, 놀라움과 변화가 느껴지는 대화체 후킹으로 쓴다. ("~라고?", "~까지 가능", "~시대 시작" 같은 톤)
+    - 제목만 봐도 "그래서 뭐가 생겼는지, 왜 놀라운지" 알 수 있어야 한다.
+    - 과장하지 말고 입력된 정보 안에서만 쓴다.
+
+    좋은 예시 (이 톤과 길이를 그대로 따라할 것):
+    2026 피그마 업데이트: 이제 피그마에서 모션까지 가능하다고?
+    Fable 5 얼마나 좋은데? 한 문장으로 게임까지 완성가능
+    구글 제미나이 flash 출시 1인 1비서 시대 시작
+
+    나쁜 예시 (이런 건조한 요약 금지):
+    2026 피그마 config 업데이트 내용: 에니메이트 기능 발표
+    Claude Fable 5 제한 해제, 성능 요약
+    구글 제미나이 flash 출시, 컴퓨터 에이전트 구축 확장
+
+    출력 규칙 (반드시 지킬 것):
+    - 아래 형식 그대로, 결과물만 출력한다.
+    - 인사말·설명·판단 근거·제목 헤더(##)·구분선 등 어떤 사족도 붙이지 않는다.
+    - 같은 주제로 서로 다른 방향의 타이틀 2개를 낸다.
+    - 타이틀은 한 줄(좋은 예시 길이 수준, 최대 30자). 캡션은 타이틀에서 빠진 기업명/모델명/제공 경로를 보완하는 한 줄.
+
+    1안. [타이틀]
+    캡션: [보조 카피]
+
+    2안. [타이틀]
+    캡션: [보조 카피]
+
+    입력 게시물:
+    """
+    제목: {headline}
+    카테고리: {category}
+    요약:
+    {bullets}
+    원본 게시물:
+    {posts}
+    출처:
+    {sources}
+    """
 
 
 email:
@@ -137,10 +194,9 @@ email:
       - "jetti0915@gmail.com"
     "국내 CS 취준생 및 주니어 개발자":
       - "ndbsrjsdn@naver.com"
-  # 폴백 (audiences 비울 때만 사용 — 큐레이션 없이 중립 발송)
   to_addresses:
     - "ehhwll@hanmail.net"
-    - "ndbsrjsdn@naver.com"
+    # - "ndbsrjsdn@naver.com"
 
 web:
   host: "0.0.0.0"

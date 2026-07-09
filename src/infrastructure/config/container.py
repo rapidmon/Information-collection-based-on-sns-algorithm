@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import asyncio
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from src.domain.entities import Category
@@ -14,6 +16,7 @@ from src.application.use_cases.generate_briefing import GenerateBriefingUseCase
 from src.application.use_cases.like_posts import LikePostsUseCase
 from src.application.use_cases.process_posts import ProcessPostsUseCase
 from src.infrastructure.ai.claude_code_processor import ClaudeCodeProcessor
+from src.infrastructure.ai.hybrid_processor import HybridAIProcessor
 from src.infrastructure.ai.openai_processor import OpenAIProcessor
 from src.infrastructure.collectors.dcinside_collector import DCInsideCollector
 from src.infrastructure.collectors.kr36_collector import Kr36Collector
@@ -30,6 +33,7 @@ from src.infrastructure.database.repositories.feedback_repo_sqlite import Feedba
 from src.infrastructure.database.repositories.post_repo_sqlite import PostRepositorySQLite
 from src.infrastructure.delivery.briefing_builder import DefaultBriefingGenerator
 from src.infrastructure.delivery.email_sender import EmailNotifier
+from src.infrastructure.delivery.slack_sender import SlackNotifier
 
 
 class Container:
@@ -44,6 +48,10 @@ class Container:
         self.settings = settings
         self.config = app_config
 
+        # AI 처리 단일 실행 락 — interval 잡·브리핑 전 처리·수동 트리거가 겹쳐도
+        # 같은 미처리 배치가 LLM을 2중으로 타지 않게 한다.
+        self._process_run_lock = asyncio.Lock()
+
         # ─── Repositories ───
         self.post_repo = PostRepositorySQLite()
         self.briefing_repo = FirestoreBriefingRepository(firestore_db)  # 브리핑만 Firestore
@@ -54,24 +62,29 @@ class Container:
         self.run_repo = SQLiteCollectionRunRepository()
 
         # ─── Infrastructure Services ───
-        # AI 백엔드 선택: claude_code(구독, API 키 불필요) 또는 openai(API 키)
-        if app_config.processing.ai_backend == "claude_code":
-            self.ai_processor = ClaudeCodeProcessor(
-                config=app_config.processing,
-                model_filter=app_config.processing.claude_model_filter,
-                model_process=app_config.processing.claude_model_process,
-                timeout=app_config.processing.claude_timeout,
-                oauth_token=settings.claude_code_oauth_token or None,
-            )
-        else:
-            self.ai_processor = OpenAIProcessor(
-                api_key=settings.openai_api_key,
-                config=app_config.processing,
-            )
+        # AI 백엔드는 하이브리드 고정: 고빈도 배치(필터·분류·검증)=OpenAI,
+        # 저빈도·품질 민감(발행 작문·큐레이션)=Claude Code. (백엔드 선택 옵션은 제거됨)
+        openai_processor = OpenAIProcessor(
+            api_key=settings.openai_api_key,
+            config=app_config.processing,
+        )
+        claude_processor = ClaudeCodeProcessor(
+            config=app_config.processing,
+            model_filter=app_config.processing.claude_model_filter,
+            model_process=app_config.processing.claude_model_process,
+            timeout=app_config.processing.claude_timeout,
+            oauth_token=settings.claude_code_oauth_token or None,
+        )
+        self.ai_processor = HybridAIProcessor(openai_processor, claude_processor)
+        # 슬랙 투표 1위 심층 글 등 파이프라인 밖 자유 프롬프트 실행용 직접 참조
+        self.claude_processor = claude_processor
 
         self.briefing_generator = DefaultBriefingGenerator(app_config.briefing)
 
         self.notifier = EmailNotifier(settings, app_config.email)
+
+        # 슬랙 브리핑 게시 (헤더+스레드, 항목별 투표 리액션 선부착)
+        self.slack_notifier = SlackNotifier(settings, app_config.slack)
 
         # 자동 좋아요 (AI 처리 후 관련+중요 게시물에만)
         self.post_liker = CdpPostLiker(app_config.like)
@@ -134,6 +147,7 @@ class Container:
         return ProcessPostsUseCase(
             post_repo=self.post_repo,
             ai_processor=self.ai_processor,
+            run_lock=self._process_run_lock,
         )
 
     def like_posts_use_case(self) -> LikePostsUseCase:
@@ -156,18 +170,21 @@ class Container:
     async def send_curated_briefing(self, briefing) -> dict:
         """독자층별 큐레이션 생성 → Morning Commit HTML 렌더 → 그룹별 발송."""
         from src.domain.services.ai_processor import Curation, MergedTopic
+        from src.infrastructure.delivery.categories import VALID_BRIEFING_CATEGORIES
         from src.infrastructure.delivery.email_renderer import render_email_html
 
         ecfg = self.config.email
         topics = []
         for it in briefing.items:
+            if it.category_name not in VALID_BRIEFING_CATEGORIES:
+                continue
             # 구조화 불릿을 그대로 사용(재파싱 방지). 구버전 브리핑엔 없으므로 body에서 폴백.
             bullets = list(it.body_bullets) if it.body_bullets else [
                 l.strip().lstrip("- ").strip() for l in (it.body or "").split("\n") if l.strip()
             ]
             topics.append(MergedTopic(
                 post_ids=it.source_post_ids or [], headline=it.headline, body_bullets=bullets,
-                primary_category=it.category_name or "AI",
+                primary_category=it.category_name,
                 importance_score=it.importance_score or 0.5,
                 sources=[], source_urls=it.source_urls or [],
             ))
@@ -198,4 +215,73 @@ class Container:
                 subject, html, briefing.content_text, addrs, ecfg.logo_path
             )
             results[persona or "default"] = {"sent": ok, "recipients": len(addrs)}
+
+        # 슬랙 게시 — 이메일과 독립적으로 시도 (실패해도 이메일 결과에 영향 없음)
+        if self.slack_notifier.is_configured:
+            try:
+                results["slack"] = await self.slack_notifier.send_briefing(briefing, date_str)
+            except Exception as e:
+                results["slack"] = {"sent": False, "error": str(e)}
         return results
+
+    async def run_slack_vote_winner(self) -> dict:
+        """슬랙 투표 집계 → 1위 항목에 winner_prompt 실행 → 결과 채널 게시.
+
+        투표가 하나도 없으면 중요도 최고 항목으로 폴백하고 메시지에 그 사실을 밝힌다.
+        오늘 게시분이 아니면(서버 재시작 등으로 상태가 오래됨) 아무것도 하지 않는다.
+        """
+        from src.infrastructure.delivery.categories import CATEGORY_EMOJI, CATEGORY_KO
+        from src.infrastructure.delivery.slack_sender import pick_winner, render_winner_prompt
+
+        scfg = self.config.slack
+        if not (self.slack_notifier.is_configured and scfg.winner_prompt.strip()):
+            return {"run": False, "reason": "not_configured"}
+
+        tally = await self.slack_notifier.tally_votes()
+        if not tally or not tally.get("items"):
+            return {"run": False, "reason": "no_state"}
+
+        # 상태 파일이 오늘 게시분인지 확인 (지난 브리핑 재집계 방지)
+        today = datetime.now(ZoneInfo(self.config.timezone)).strftime("%Y. %m. %d")
+        if tally.get("date_str") != today:
+            return {"run": False, "reason": f"stale_state({tally.get('date_str')})"}
+
+        winner = pick_winner(tally["items"])
+        if winner is None:
+            return {"run": False, "reason": "no_items"}
+
+        # 원본 게시물 본문 수집 (브리핑 후 정리로 삭제됐을 수 있어 있는 것만)
+        posts_lines = []
+        for pid in (winner.get("source_post_ids") or [])[:5]:
+            try:
+                p = self.post_repo.find_by_id(str(pid))
+            except Exception:
+                p = None
+            if p is not None and getattr(p, "content", None):
+                posts_lines.append(f"[{p.source}] {p.content[:1500]}")
+        posts_text = "\n\n".join(posts_lines) if posts_lines else "(원본 게시물 없음)"
+
+        prompt = render_winner_prompt(scfg.winner_prompt, winner, posts_text, tally["date_str"])
+        text = await self.claude_processor.run_freeform(
+            prompt, websearch=scfg.winner_websearch
+        )
+
+        cat = winner.get("category") or "Other"
+        vote_note = (
+            "투표 없음 — 중요도 기준 선정" if winner.get("no_votes")
+            else f"👍 {winner.get('up', 0)} · 👎 {winner.get('down', 0)}"
+        )
+        header = (
+            f"🏆 *오늘의 투표 1위* — "
+            f"{CATEGORY_EMOJI.get(cat, '🗂')} [{CATEGORY_KO.get(cat, cat)}] "
+            f"{winner.get('headline', '')} ({vote_note})"
+        )
+        await self.slack_notifier.post_message(f"{header}\n\n{text}")
+        return {
+            "run": True,
+            "winner": winner.get("headline"),
+            "up": winner.get("up", 0),
+            "down": winner.get("down", 0),
+            "no_votes": winner.get("no_votes", False),
+            "text": text,
+        }

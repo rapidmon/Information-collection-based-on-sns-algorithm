@@ -35,3 +35,4 @@ build/
 
 # Playwright MCP
 .playwright-mcp/
+data/

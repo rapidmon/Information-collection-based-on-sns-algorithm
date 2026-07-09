@@ -17,6 +17,7 @@ OpenAIProcessor의 프롬프트·JSON 파싱·토픽 병합·웹 검색 로직�
 
 from __future__ import annotations
 
+import asyncio
 import glob
 import json
 import logging
@@ -28,6 +29,7 @@ import tempfile
 from src.domain.services.ai_processor import VerificationResult
 from src.infrastructure.ai.openai_processor import (
     BaseLLMProcessor,
+    LLMBackendError,
     _parse_json_response,
     _posts_to_json_lite,
 )
@@ -99,14 +101,24 @@ class ClaudeCodeProcessor(BaseLLMProcessor):
             return [comspec, "/c", self._claude_bin, *args]
         return [self._claude_bin, *args]
 
-    def _run_claude(self, args: list[str], prompt: str, label: str = "claude") -> str:
+    def _run_claude(
+        self,
+        args: list[str],
+        prompt: str,
+        label: str = "claude",
+        use_system_prompt: bool = True,
+    ) -> str:
         """`claude -p`를 헤드리스로 실행하고 응답 봉투의 result(텍스트)를 반환한다.
 
         subprocess 실행·타임아웃·종료코드·봉투 JSON 파싱·is_error 처리를 한곳에 모은다.
         역할/규칙(SYSTEM_PROMPT)은 시스템 주입이 아니라 사용자 프롬프트 최상단에 둔다.
+        (SYSTEM_PROMPT는 'JSON 배열만 출력'을 강제하므로 자유 텍스트 출력이 필요한
+         호출은 use_system_prompt=False로 우회한다.)
         """
-        full_prompt = f"{SYSTEM_PROMPT}\n\n{prompt}"
+        full_prompt = f"{SYSTEM_PROMPT}\n\n{prompt}" if use_system_prompt else prompt
         cmd = self._build_command(args)
+        # CLI 수준 장애는 전부 LLMBackendError로 승격 — compose/curation의 내부
+        # 예외 삼킴을 통과해 hybrid의 OpenAI 폴백이 실제로 작동하게 한다.
         try:
             proc = subprocess.run(
                 cmd,
@@ -119,18 +131,20 @@ class ClaudeCodeProcessor(BaseLLMProcessor):
                 timeout=self._timeout,
             )
         except subprocess.TimeoutExpired as e:
-            raise RuntimeError(f"{label} 타임아웃({self._timeout}s)") from e
+            raise LLMBackendError(f"{label} 타임아웃({self._timeout}s)") from e
+        except OSError as e:  # 바이너리 미설치·실행 불가(FileNotFoundError 포함)
+            raise LLMBackendError(f"{label} 실행 실패: {e}") from e
 
         if proc.returncode != 0:
-            raise RuntimeError(f"{label} 종료코드 {proc.returncode}: {(proc.stderr or '')[:300]}")
+            raise LLMBackendError(f"{label} 종료코드 {proc.returncode}: {(proc.stderr or '')[:300]}")
 
         try:
             envelope = json.loads(proc.stdout)
         except json.JSONDecodeError as e:
-            raise RuntimeError(f"{label} 응답 봉투 JSON 파싱 실패: {(proc.stdout or '')[:300]}") from e
+            raise LLMBackendError(f"{label} 응답 봉투 JSON 파싱 실패: {(proc.stdout or '')[:300]}") from e
 
         if envelope.get("is_error"):
-            raise RuntimeError(f"{label} 처리 오류: {str(envelope.get('result'))[:300]}")
+            raise LLMBackendError(f"{label} 처리 오류: {str(envelope.get('result'))[:300]}")
 
         # 봉투의 result에 모델의 실제 텍스트가 담긴다. 파싱은 base의 _parse_json_response가 처리.
         return envelope.get("result", "")
@@ -147,16 +161,48 @@ class ClaudeCodeProcessor(BaseLLMProcessor):
             args += ["--model", claude_model]
         return self._run_claude(args, prompt, label="claude CLI")
 
-    def _call_api_with_search(self, prompt: str, max_turns: int = 6) -> str:
+    def _call_api_with_search(
+        self,
+        prompt: str,
+        max_turns: int = 6,
+        model: str | None = None,
+        use_system_prompt: bool = True,
+    ) -> str:
         """WebSearch 도구를 허용해 Claude가 직접 웹을 검색하며 응답하게 한다(구독, API 키 X)."""
         args = [
             "-p", "--output-format", "json",
             "--allowedTools", "WebSearch",
             "--max-turns", str(max_turns),
         ]
-        if self._claude_model_filter:
-            args += ["--model", self._claude_model_filter]
-        return self._run_claude(args, prompt, label="claude WebSearch")
+        claude_model = model or self._claude_model_filter
+        if claude_model:
+            args += ["--model", claude_model]
+        return self._run_claude(
+            args, prompt, label="claude WebSearch", use_system_prompt=use_system_prompt
+        )
+
+    async def run_freeform(
+        self, prompt: str, websearch: bool = True, max_turns: int = 8
+    ) -> str:
+        """임의 프롬프트를 process 모델로 실행해 자유 텍스트를 반환.
+
+        슬랙 투표 1위 심층 글 등 파이프라인 밖 용도. SYSTEM_PROMPT(JSON 강제)를
+        붙이지 않으며, subprocess 블로킹은 to_thread로 이벤트 루프에서 분리한다.
+        """
+        if websearch:
+            return await asyncio.to_thread(
+                self._call_api_with_search,
+                prompt,
+                max_turns,
+                self._claude_model_process,
+                False,
+            )
+        args = ["-p", "--output-format", "json", "--max-turns", "1"]
+        if self._claude_model_process:
+            args += ["--model", self._claude_model_process]
+        return await asyncio.to_thread(
+            self._run_claude, args, prompt, "claude freeform", False
+        )
 
     async def verify_claims(self, posts: list) -> list:
         """Claude 내장 WebSearch로 교차검증(DuckDuckGo 미사용). 실패 시 전체 통과.
