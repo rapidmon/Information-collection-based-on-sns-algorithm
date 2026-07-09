@@ -19,6 +19,17 @@ CATEGORY_KO: dict[str, str] = {
     "Other": "기타",
 }
 
+VALID_BRIEFING_CATEGORIES: tuple[str, ...] = (
+    "AI",
+    "Semiconductor",
+    "Cloud",
+    "BigTech",
+    "Startup",
+    "Regulation",
+    "Coding",
+    "Showcase",
+)
+
 # 카테고리 키 → 이모지 (이메일 라벨용)
 CATEGORY_EMOJI: dict[str, str] = {
     "AI": "🧠",

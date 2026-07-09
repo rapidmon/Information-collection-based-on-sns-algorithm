@@ -1,15 +1,15 @@
 """유즈케이스: 브리핑 생성.
 
-새 파이프라인(중요도 재설계):
-  ① 클러스터링 — 같은 사건끼리 병합 (LLM)
-  ② 티어 판정 — 이벤트별 뉴스가치 절대 등급 major/notable/minor (LLM)
-  ③ 중요도 산정 — 객관 신호(고유출처 빈도 + 인게이지먼트 백분위) + 티어 보정,
-                  그날 최고점=1.0으로 정규화 (코드, importance_scorer)
+파이프라인:
+  ① 게시물 점수 산정 — 분류 완료 게시물을 카테고리별 상대평가
+  ② 클러스터링 — 토큰 유사도 후보군을 결정적으로 병합 (LLM 미사용)
+  ③ 사건 점수 집계 — 사전 계산된 게시물 점수를 사건 단위로 집계
   ④ 검증 — 리스트업된 상위(정규화 0.85+) 후보만 웹검색 교차검증, 과반 반박 클러스터 제거
-  ⑤ 문서 생성 — 정렬·컷·카테고리 상한 적용
+  ⑤ 선별 — 점수 하한·카테고리 상한으로 발행 항목 확정
+  ⑥ 작문 — 발행 확정 항목만 LLM으로 headline/불릿 리라이트 (탈락분 작문 토큰 절약)
+  ⑦ 문서 생성
 
-중요도를 개별 게시물 배치에서 매기던 방식(주관·배치 상대성)을 걷어내고,
-클러스터(이벤트) 단위 객관 신호로 산정한다.
+하나의 사건이 여러 카테고리에 걸쳐도 최종 브리핑에는 대표 카테고리 하나로만 노출한다.
 """
 
 from __future__ import annotations
@@ -22,13 +22,16 @@ from src.domain.repositories.briefing_repository import BriefingRepository
 from src.domain.repositories.post_repository import PostRepository
 from src.domain.services.ai_processor import AIProcessor
 from src.domain.services.briefing_generator import BriefingGenerator
-from src.infrastructure.ai.importance_scorer import score_topics
+from src.infrastructure.ai.importance_scorer import score_posts_by_category, score_topics
 from src.infrastructure.config.settings import ScoringConfig
 
 logger = logging.getLogger(__name__)
 
 # 리스트업된 항목 중 이 정규화 점수 이상만 신뢰도 검증(웹검색)
 VERIFY_MIN_SCORE = 0.85
+
+# 브리핑 완료 후 이 AI 중요도 이하 게시물은 즉시 삭제 (재사용처 없음)
+PURGE_MAX_SCORE = 0.6
 
 
 class GenerateBriefingUseCase:
@@ -63,39 +66,35 @@ class GenerateBriefingUseCase:
         # LLM이 post_ids를 문자열/정수 어느 쪽으로 반환해도 맞도록 str 키로 통일
         post_map = {str(p.id): p for p in posts if p.id is not None}
 
-        # ① 클러스터링 (같은 사건 병합)
+        # ① 분류 완료 게시물을 카테고리별 상대 점수로 먼저 산정한다.
+        post_category_scores = score_posts_by_category(posts, self._scoring)
+
+        # ② 클러스터링 (같은 사건 병합)
         merged_topics = await self._ai.deduplicate_and_merge(posts)
         if not merged_topics:
             logger.warning("클러스터링 결과 없음")
             merged_topics = []
 
-        # ② LLM 티어(절대 등급) 판정 — 사용자 피드백(과대/과소)을 few-shot 보정으로 주입
-        calibration = None
-        if self._feedback_repo is not None:
-            try:
-                calibration = self._feedback_repo.get_examples(limit=40)
-                if calibration:
-                    logger.info(f"티어 판정에 사용자 보정 예시 {len(calibration)}건 적용")
-            except Exception as e:
-                logger.warning(f"피드백 예시 조회 실패(무시): {e}")
-        tiers = await self._ai.judge_tiers(merged_topics, calibration_examples=calibration)
-        if len(tiers) != len(merged_topics):
-            logger.warning(
-                f"티어 개수 불일치 (topics={len(merged_topics)}, tiers={len(tiers)}) — "
-                f"부족분은 minor로 남는다"
-            )
-        for t, tier in zip(merged_topics, tiers):
-            t.tier = tier
-
-        # ③ 객관 신호 + 티어 결합 중요도 (정규화 max=1.0), 피처 스냅샷 저장
-        score_topics(merged_topics, post_map, posts, self._scoring)
+        # ③ 병합된 사건은 사전 계산된 게시물 점수를 집계만 한다.
+        score_topics(
+            merged_topics,
+            post_map,
+            posts,
+            self._scoring,
+            post_category_scores=post_category_scores,
+        )
 
         # ④ 상위(0.85+) 후보만 검증 → 과반 반박 클러스터 제거
         merged_topics = await self._verify_top(merged_topics, post_map)
 
-        # ⑤ 브리핑 문서 생성 (정렬·최소점수·카테고리 상한은 generator가 처리)
+        # ⑤ 발행 항목 확정 → ⑥ 확정분만 LLM 작문 (탈락 토픽 작문 토큰 절약)
+        selected = self._gen.select_topics(merged_topics)
+        logger.info(f"발행 항목 확정: {len(merged_topics)}개 토픽 중 {len(selected)}개")
+        selected = await self._ai.compose_topics(selected, posts)
+
+        # ⑦ 브리핑 문서 생성 (generate 내부 재선별은 멱등)
         briefing = await self._gen.generate(
-            merged_topics=merged_topics,
+            merged_topics=selected,
             period_start=period_start,
             period_end=period_end,
             total_posts_analyzed=len(posts),
@@ -103,11 +102,21 @@ class GenerateBriefingUseCase:
 
         briefing = await self._briefing_repo.save(briefing)
 
-        # 포함 후보 게시물 브리핑 완료 마킹 (재등장·중복 브리핑 방지)
-        post_ids = [p.id or p.external_id for p in posts if p.id or p.external_id]
+        # 후보 전체(선별 탈락 포함)를 완료 마킹한다.
+        # 포함분만 마킹하면 탈락 글이 30일 정리 전까지 매일 재클러스터링(LLM)·재검증을
+        # 반복해 토큰이 새고, 후보 풀이 누적 성장해 dedup(O(n²))이 계속 느려진다.
+        post_ids = [p.id for p in posts if p.id is not None]
         if post_ids:
             marked = await self._post_repo.mark_briefed(post_ids, datetime.utcnow())
             logger.info(f"브리핑 완료 마킹: {marked}건")
+
+        # 브리핑이 끝난 저중요도 게시물은 즉시 삭제 (30일 정리를 기다리지 않음)
+        try:
+            purged = await self._post_repo.delete_low_importance(PURGE_MAX_SCORE)
+            if purged:
+                logger.info(f"저중요도({PURGE_MAX_SCORE} 이하) 브리핑 완료 게시물 삭제: {purged}건")
+        except Exception as e:
+            logger.warning(f"저중요도 게시물 삭제 실패(무시): {e}")
 
         logger.info(f"브리핑 생성 완료: '{briefing.title}' ({briefing.total_items}건 항목)")
         return briefing
@@ -138,7 +147,8 @@ class GenerateBriefingUseCase:
             logger.warning(f"후보 신뢰도 검증 실패(스킵): {e}")
             return topics
 
-        contradicted = {r.post_id for r in vres if r.credibility == "contradicted"}
+        # LLM이 post_id를 숫자/문자열 어느 쪽으로 반환해도 맞도록 str로 통일
+        contradicted = {str(r.post_id) for r in vres if r.credibility == "contradicted"}
         if not contradicted:
             return topics
 
@@ -147,7 +157,7 @@ class GenerateBriefingUseCase:
             ids = t.post_ids or []
             # 각 post_id를 실제 Post로 풀어 그 .id가 반박 집합에 있는지 본다(타입 통일)
             member_posts = [post_map.get(str(pid)) for pid in ids]
-            contra = [p for p in member_posts if p and p.id in contradicted]
+            contra = [p for p in member_posts if p and str(p.id) in contradicted]
             if ids and len(contra) > len(ids) / 2:
                 logger.info(
                     f"스캠/허위로 클러스터 제외: {t.headline[:50]} "

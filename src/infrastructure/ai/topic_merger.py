@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 
-from src.domain.services.ai_processor import MergedTopic
+from src.domain.services.ai_processor import MergedTopic, normalize_topic_bullets
 
 
 class TopicMerger:
@@ -20,6 +20,45 @@ class TopicMerger:
     )
     _PRODUCT_NAME_PATTERN = re.compile(r'[a-z]+\d')
 
+    # 한국어 음차 표기 → 영문 정식 표기. 토큰화 전에 headline 문자열에서 치환해
+    # "엔비디아"(DCInside)와 "NVIDIA"(X) 같은 한/영 표기 이질로 병합 후보를
+    # 놓치는 것을 막는다. 긴 키부터 치환(부분 문자열 오치환 방지).
+    _KR_EN_ALIASES: list[tuple[str, str]] = sorted(
+        [
+            ("오픈에이아이", "OpenAI"), ("오픈AI", "OpenAI"),
+            ("챗지피티", "ChatGPT"), ("챗GPT", "ChatGPT"),
+            ("앤트로픽", "Anthropic"), ("앤스로픽", "Anthropic"),
+            ("클로드", "Claude"),
+            ("제미나이", "Gemini"), ("제미니", "Gemini"),
+            ("딥마인드", "DeepMind"), ("딥시크", "DeepSeek"),
+            ("엔비디아", "NVIDIA"), ("블랙웰", "Blackwell"),
+            ("삼성전자", "Samsung"), ("하이닉스", "Hynix"),
+            ("마이크론", "Micron"), ("퀄컴", "Qualcomm"),
+            ("브로드컴", "Broadcom"), ("인텔", "Intel"),
+            ("마이크로소프트", "Microsoft"), ("구글", "Google"),
+            ("아마존", "Amazon"), ("애플", "Apple"),
+            ("테슬라", "Tesla"), ("메타", "Meta"),
+            ("화웨이", "Huawei"), ("샤오미", "Xiaomi"),
+            ("알리바바", "Alibaba"), ("텐센트", "Tencent"),
+            ("바이트댄스", "ByteDance"), ("소프트뱅크", "SoftBank"),
+            ("팔란티어", "Palantir"), ("스페이스엑스", "SpaceX"), ("스페이스X", "SpaceX"),
+            ("웨이모", "Waymo"), ("미스트랄", "Mistral"), ("그록", "Grok"),
+            ("깃허브", "GitHub"), ("코파일럿", "Copilot"),
+            ("허깅페이스", "HuggingFace"), ("파이토치", "PyTorch"),
+            ("유튜브", "YouTube"), ("인스타그램", "Instagram"),
+            ("어도비", "Adobe"), ("오라클", "Oracle"),
+            ("세일즈포스", "Salesforce"), ("노션", "Notion"), ("피그마", "Figma"),
+            ("아이폰", "iPhone"), ("갤럭시", "Galaxy"),
+            # 가드: 아래 일반 단어를 먼저 소비해 "애플리케이션"→"Apple리케이션",
+            # "메타버스"→"Meta버스" 같은 오치환(가짜 기업 토큰)을 막는다.
+            ("애플리케이션", "application"),
+            ("메타버스", "metaverse"), ("메타데이터", "metadata"), ("메타인지", "metacognition"),
+            ("인텔리전스", "intelligence"), ("인텔리제이", "IntelliJ"),
+        ],
+        key=lambda kv: len(kv[0]),
+        reverse=True,
+    )
+
     @classmethod
     def normalize_token(cls, token: str) -> str:
         """토큰을 정규화한다 (소문자, 하이픈/공백 제거, 한국어 조사 제거)."""
@@ -27,14 +66,20 @@ class TopicMerger:
         t = cls._KR_SUFFIXES.sub('', t)
         return t
 
-    @staticmethod
-    def extract_key_tokens(headline: str) -> set[str]:
+    @classmethod
+    def extract_key_tokens(cls, headline: str) -> set[str]:
         """headline에서 핵심 토큰을 추출.
 
+        - 한국어 음차 표기를 영문 정식 표기로 통일 (엔비디아 → NVIDIA)
         - 영문 이름+버전을 하나의 토큰으로 유지 (GPT-5.5, Claude 4.7 등)
         - 한국어 조사 제거 후 어간만 추출
         - 고유명사 중심 추출
         """
+        # 0단계: 한/영 별칭 통일 ("엔비디아가" → "NVIDIA가" → 영문 토큰으로 추출됨)
+        for kr, en in cls._KR_EN_ALIASES:
+            if kr in headline:
+                headline = headline.replace(kr, en)
+
         # 1단계: 영문 이름+버전번호를 하나로 묶음
         merged = re.findall(
             r'[A-Za-z][A-Za-z0-9]*(?:[- ]?\d+(?:\.\d+)*)?', headline
@@ -162,6 +207,7 @@ class TopicMerger:
 
         combined_sources = list(dict.fromkeys(combined_sources))
         combined_urls = list(dict.fromkeys(combined_urls))
+        combined_bullets = normalize_topic_bullets(combined_bullets)
 
         return MergedTopic(
             post_ids=combined_post_ids,

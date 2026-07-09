@@ -318,6 +318,24 @@ class PostRepositorySQLite:
         conn.commit()
         return cursor.rowcount
 
+    def delete_irrelevant_older_than(self, days: int) -> int:
+        """필터 탈락(is_relevant=0) 게시물 중 N일간 재수집되지 않은 것 삭제.
+
+        collected_at은 재수집 때마다 갱신되므로 'N일 경과' = 'N일간 피드에 없음'.
+        수집 컷오프(max_age_days)보다 길게 잡으면 삭제 직후 같은 글이 신규로
+        재수집돼 재필터링(토큰 낭비)되는 루프가 원천 차단된다.
+        """
+        cutoff_date = datetime.now() - timedelta(days=days)
+        conn = _get_db()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            "DELETE FROM posts WHERE is_relevant = 0 AND collected_at < ?",
+            (cutoff_date,)
+        )
+        conn.commit()
+        return cursor.rowcount
+
     def count(self) -> int:
         """전체 Post 수."""
         conn = _get_db()
@@ -537,6 +555,26 @@ class PostRepositorySQLite:
             return cursor.rowcount
 
         return await asyncio.to_thread(_update)
+
+    async def delete_low_importance(self, max_score: float) -> int:
+        """브리핑 완료(briefed_at NOT NULL)이고 중요도 max_score 이하인 게시물 삭제.
+
+        브리핑이 끝난 저중요도 게시물은 재사용처가 없으므로 30일 정리를 기다리지
+        않고 즉시 지워 저장공간·조회 부담을 줄인다.
+        """
+        def _delete():
+            conn = _get_db()
+            cursor = conn.cursor()
+            cursor.execute("""
+                DELETE FROM posts
+                WHERE briefed_at IS NOT NULL
+                  AND importance_score IS NOT NULL
+                  AND importance_score <= ?
+            """, (max_score,))
+            conn.commit()
+            return cursor.rowcount
+
+        return await asyncio.to_thread(_delete)
 
     def get_storage_info(self) -> dict[str, Any]:
         """저장 공간 정보."""

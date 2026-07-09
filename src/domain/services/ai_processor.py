@@ -5,6 +5,26 @@ from typing import Protocol
 
 from src.domain.entities import Post
 
+MAX_TOPIC_BULLETS = 3
+
+
+def normalize_topic_bullets(bullets: list[str] | None, limit: int = MAX_TOPIC_BULLETS) -> list[str]:
+    """Keep briefing topic details short and stable for email rendering."""
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for bullet in bullets or []:
+        text = str(bullet).strip()
+        if not text:
+            continue
+        key = " ".join(text.split()).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append(text)
+        if len(normalized) >= limit:
+            break
+    return normalized
+
 
 @dataclass
 class FilterResult:
@@ -46,6 +66,7 @@ class MergedTopic:
             self.source_urls = []
         if self.score_features is None:
             self.score_features = {}
+        self.body_bullets = normalize_topic_bullets(self.body_bullets)
 
 
 @dataclass
@@ -91,6 +112,12 @@ class AIProcessor(Protocol):
 
     async def deduplicate_and_merge(self, posts: list[Post]) -> list[MergedTopic]:
         """중복 제거 및 유사 토픽 통합 브리핑 항목 생성."""
+        ...
+
+    async def compose_topics(
+        self, topics: list["MergedTopic"], posts: list[Post]
+    ) -> list[MergedTopic]:
+        """발행 확정 토픽의 headline/불릿 작문 (선별 이후에만 호출해 토큰 절약)."""
         ...
 
     async def generate_curation(

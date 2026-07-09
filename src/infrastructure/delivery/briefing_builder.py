@@ -11,12 +11,12 @@ from datetime import datetime
 from html import escape as _esc
 
 from src.domain.entities import Briefing, BriefingItem
-from src.domain.services.ai_processor import MergedTopic
+from src.domain.services.ai_processor import MergedTopic, normalize_topic_bullets
 from src.infrastructure.config.settings import BriefingConfig
-from src.infrastructure.delivery.categories import CATEGORY_KO  # 한국어 라벨 단일 소스
+from src.infrastructure.delivery.categories import CATEGORY_KO, VALID_BRIEFING_CATEGORIES  # 한국어 라벨 단일 소스
 
 # 카테고리 정렬 우선순위
-CATEGORY_ORDER = ["AI", "Semiconductor", "Cloud", "BigTech", "Startup", "Regulation", "Coding", "Showcase", "Other"]
+CATEGORY_ORDER = list(VALID_BRIEFING_CATEGORIES)
 
 
 def _safe_url(url: str) -> str:
@@ -52,42 +52,18 @@ class DefaultBriefingGenerator:
         period_end: datetime,
         total_posts_analyzed: int,
     ) -> Briefing:
-        # 중요도 기준 정렬
-        merged_topics.sort(key=lambda t: t.importance_score, reverse=True)
-
-        # 병합 후 최종 점수 하한 (재산정된 저중요도 토픽 제거). 전부 잘리면 원본 유지.
-        # 카테고리별 점수 축(뉴스 티어 vs 쇼케이스 흥미도)은 importance_scorer가 이미
-        # 반영하므로 여기서는 단순 하한 컷만 한다.
-        min_imp = self._config.min_importance
-        filtered = [t for t in merged_topics if (t.importance_score or 0) >= min_imp]
-        if filtered:
-            merged_topics = filtered
-
-        # 카테고리별 상한 (한 카테고리가 브리핑을 뒤덮지 않게)
-        cap = self._config.max_per_category
-        if cap:
-            per_cat: dict[str, int] = {}
-            capped = []
-            for t in merged_topics:  # 이미 중요도 내림차순
-                c = t.primary_category or "Other"
-                per_cat[c] = per_cat.get(c, 0) + 1
-                if per_cat[c] <= cap:
-                    capped.append(t)
-            merged_topics = capped
-
-        # 전체 최대 항목 수 제한
-        if self._config.max_items:
-            merged_topics = merged_topics[: self._config.max_items]
+        merged_topics = self.select_topics(merged_topics)
 
         # BriefingItem 생성
         items: list[BriefingItem] = []
         for idx, topic in enumerate(merged_topics):
-            body = "\n".join(f"- {b}" for b in topic.body_bullets)
+            body_bullets = normalize_topic_bullets(topic.body_bullets)
+            body = "\n".join(f"- {b}" for b in body_bullets)
             items.append(
                 BriefingItem(
                     headline=topic.headline,
                     body=body,
-                    body_bullets=list(topic.body_bullets or []),
+                    body_bullets=body_bullets,
                     importance_score=topic.importance_score,
                     category_name=topic.primary_category,
                     sort_order=idx,
@@ -117,6 +93,38 @@ class DefaultBriefingGenerator:
         return briefing
 
     # ─── 텍스트 렌더링 ───
+
+    def select_topics(self, topics: list[MergedTopic]) -> list[MergedTopic]:
+        """카테고리별 상대 점수로 브리핑 항목을 고른다.
+
+        각 카테고리 안에서 importance_score >= min_importance인 항목만 남기고,
+        중요도순으로 max_per_category개까지 선택한다. 유즈케이스가 이 결과에만
+        LLM 작문(compose_topics)을 수행하도록 공개 메서드로 노출한다(멱등).
+        """
+        by_cat: dict[str, list[MergedTopic]] = defaultdict(list)
+        for topic in topics:
+            if topic.primary_category not in VALID_BRIEFING_CATEGORIES:
+                continue
+            by_cat[topic.primary_category].append(topic)
+
+        selected: list[MergedTopic] = []
+        for cat in CATEGORY_ORDER:
+            cat_topics = sorted(
+                by_cat.get(cat, []),
+                key=lambda t: t.importance_score or 0,
+                reverse=True,
+            )
+            cat_topics = [
+                t for t in cat_topics
+                if (t.importance_score or 0) >= self._config.min_importance
+            ]
+            if self._config.max_per_category:
+                cat_topics = cat_topics[: self._config.max_per_category]
+            selected.extend(cat_topics)
+
+        if self._config.max_items:
+            selected = selected[: self._config.max_items]
+        return selected
 
     def _render_text(self, briefing: Briefing) -> str:
         lines: list[str] = []

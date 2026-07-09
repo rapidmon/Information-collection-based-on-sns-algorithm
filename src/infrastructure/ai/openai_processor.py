@@ -6,6 +6,7 @@ GPT-4o-mini로 필터링, GPT-4o로 요약/분류/통합 — 비용 최적화.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -23,12 +24,13 @@ from src.domain.services.ai_processor import (
     FilterResult,
     MergedTopic,
     VerificationResult,
+    normalize_topic_bullets,
 )
 from src.infrastructure.ai.prompts import (
     CATEGORIZE,
+    COMPOSE_TOPICS,
     CROSS_CHUNK_MERGE,
     CURATION,
-    DEDUPLICATE_AND_MERGE,
     EXTRACT_CLAIMS,
     FILTER_AND_SUMMARIZE,
     SYSTEM_PROMPT,
@@ -37,8 +39,18 @@ from src.infrastructure.ai.prompts import (
 )
 from src.infrastructure.ai.topic_merger import TopicMerger
 from src.infrastructure.config.settings import ProcessingConfig
+from src.infrastructure.delivery.categories import VALID_BRIEFING_CATEGORIES
 
 logger = logging.getLogger(__name__)
+
+
+class LLMBackendError(RuntimeError):
+    """LLM 백엔드 자체 장애 (CLI 미설치·인증 만료·한도 소진·타임아웃).
+
+    개별 응답 파싱 실패와 달리 같은 백엔드로 재시도해도 소용없는 오류.
+    compose/curation의 내부 예외 처리를 통과해 상위(hybrid)로 전파되어야
+    OpenAI 폴백이 트리거된다.
+    """
 
 
 def _chunked(lst: list, size: int):
@@ -115,6 +127,30 @@ def _posts_to_json_lite(posts: list[Post]) -> str:
     return json.dumps(items, ensure_ascii=False, indent=2)
 
 
+def _primary_category_from_post(post: Post) -> str:
+    for cat in post.category_names or []:
+        if cat in VALID_BRIEFING_CATEGORIES:
+            return cat
+    return "Other"
+
+
+def _fallback_topic_from_post(post: Post) -> MergedTopic:
+    return MergedTopic(
+        post_ids=[post.id] if post.id else [],
+        headline=post.summary or (post.content_text or "")[:100],
+        body_bullets=[post.summary or (post.content_text or "")[:300]],
+        primary_category=_primary_category_from_post(post),
+        importance_score=post.importance_score or 0.5,
+        sources=[post.source],
+        source_urls=[post.url] if post.url else [],
+    )
+
+
+def _singleton_topic_from_post(post: Post) -> MergedTopic:
+    """Build a deterministic singleton topic used for candidate discovery."""
+    return _fallback_topic_from_post(post)
+
+
 def _extract_balanced_json(text: str, open_ch: str, close_ch: str) -> str:
     """응답에서 첫 번째 '균형 잡힌' open_ch...close_ch 스팬을 추출한다.
 
@@ -175,6 +211,10 @@ class BaseLLMProcessor:
         """LLM 호출. 백엔드별 서브클래스(OpenAIProcessor/ClaudeCodeProcessor)가 구현한다."""
         raise NotImplementedError
 
+    def _curation_model(self) -> str:
+        """Model to use for curation JSON generation."""
+        return self._config.model_process
+
     async def filter_and_summarize(self, posts: list[Post]) -> list[FilterResult]:
         """관련성 필터 + 요약 (GPT-4o-mini 사용, 배치)."""
         results: list[FilterResult] = []
@@ -184,7 +224,12 @@ class BaseLLMProcessor:
             prompt = FILTER_AND_SUMMARIZE.format(posts_json=posts_json)
 
             try:
-                response_text = self._call_api(self._config.model_filter, prompt)
+                # gpt-5 계열은 추론 토큰이 completion 한도를 같이 소모 — 배치 40건
+                # JSON이 잘리면 누락 게시물이 비관련 처리되므로 한도를 넉넉히 준다.
+                # to_thread: 동기 API 호출이 이벤트 루프(웹·수집 잡)를 막지 않게.
+                response_text = await asyncio.to_thread(
+                    self._call_api, self._config.model_filter, prompt, 16384
+                )
                 parsed = _parse_json_response(response_text)
 
                 for item in parsed:
@@ -225,7 +270,10 @@ class BaseLLMProcessor:
             prompt = CATEGORIZE.format(posts_json=posts_json)
 
             try:
-                response_text = self._call_api(self._config.model_filter, prompt)
+                # 추론 토큰과 배치 JSON이 한도를 나눠 쓰므로 잘림 방지용 상향
+                response_text = await asyncio.to_thread(
+                    self._call_api, self._config.model_filter, prompt, 16384
+                )
                 parsed = _parse_json_response(response_text)
 
                 for item in parsed:
@@ -238,13 +286,11 @@ class BaseLLMProcessor:
                         )
                     )
             except Exception as e:
-                logger.error(f"분류 API 호출 실패: {e}")
-                for p in batch:
-                    results.append(
-                        CategoryResult(
-                            post_id=p.id, categories=["Other"], importance_score=0.5
-                        )
-                    )
+                # 폴백 결과를 만들지 않고 배치를 통째로 누락시킨다 — 과거의
+                # ["Other"] 폴백은 sanitize에서 전멸해 배치 40건이 비관련으로
+                # 강등·삭제됐다. 누락된 게시물은 process_posts가 DB 업데이트에서
+                # 제외해 다음 사이클에 자동 재시도된다.
+                logger.error(f"분류 API 호출 실패(배치 {len(batch)}건 다음 사이클 재시도): {e}")
 
         logger.info(f"분류 완료: {len(results)}건")
         return results
@@ -287,89 +333,142 @@ class BaseLLMProcessor:
         logger.info(f"티어 판정: major={tiers.count('major')} notable={tiers.count('notable')} minor={tiers.count('minor')}")
         return tiers
 
+    def _dedup_candidate_groups(self, posts: list[Post]) -> list[list[Post]]:
+        """Create stable merge candidate groups from the full post set.
+
+        This step must not depend on `dedup_chunk_size`. The chunk size should be
+        only a throughput/token parameter, not something that changes briefing
+        membership. Candidate groups are based on deterministic token similarity
+        over all singleton topics.
+        """
+        sorted_posts = sorted(
+            [p for p in posts if p.id is not None],
+            key=lambda p: (str(p.published_at or p.collected_at or ""), str(p.id)),
+        )
+        singleton_topics = [_singleton_topic_from_post(p) for p in sorted_posts]
+        candidate_indices = self._merger.find_merge_candidates(singleton_topics)
+
+        grouped_indices = {
+            idx
+            for group in candidate_indices
+            for idx in group
+        }
+        groups = [
+            [sorted_posts[idx] for idx in group]
+            for group in candidate_indices
+        ]
+        groups.extend(
+            [post]
+            for idx, post in enumerate(sorted_posts)
+            if idx not in grouped_indices
+        )
+        groups.sort(key=lambda group: (str(group[0].published_at or group[0].collected_at or ""), str(group[0].id)))
+        return groups
+
+    def _merge_group_deterministic(self, group: list[Post]) -> MergedTopic:
+        """후보군 하나를 LLM 없이 하나의 토픽으로 병합한다.
+
+        headline은 그룹 내 최고 중요도 게시물의 요약, 불릿은 멤버 요약들(≤3).
+        발행이 확정되면 compose_topics()가 이 초안을 리라이트한다.
+        """
+        singletons = [_singleton_topic_from_post(p) for p in group]
+        if len(singletons) == 1:
+            return singletons[0]
+        return self._merger.merge_topic_group(singletons, list(range(len(singletons))))
+
     async def deduplicate_and_merge(self, posts: list[Post]) -> list[MergedTopic]:
-        """중복 제거 + 토픽 통합 (GPT-4o 사용, 청킹)."""
+        """중복 제거 + 토픽 통합 (결정적, LLM 미사용).
+
+        토큰 유사도 후보군을 그대로 토픽으로 병합만 한다. headline/불릿 작문은
+        점수·선별이 끝난 뒤 발행 확정 항목에만 compose_topics()로 수행해,
+        탈락할 토픽까지 LLM으로 작문하던 낭비를 없앤다.
+        """
         if not posts:
             return []
 
-        all_results: list[MergedTopic] = []
-        chunk_size = self._config.dedup_chunk_size
+        candidate_groups = self._dedup_candidate_groups(posts)
+        all_results = [self._merge_group_deterministic(g) for g in candidate_groups]
 
-        for i, chunk in enumerate(_chunked(posts, chunk_size)):
-            post_map = {str(p.id): p for p in chunk if p.id is not None}
-            posts_json = _posts_to_json_lite(chunk)
-            prompt = DEDUPLICATE_AND_MERGE.format(posts_json=posts_json)
+        logger.info(
+            "중복제거/병합(결정적): %s건 → %s개 토픽 (LLM 미사용)",
+            len(posts),
+            len(all_results),
+        )
+        return all_results
+
+    async def compose_topics(self, topics: list[MergedTopic], posts: list[Post]) -> list[MergedTopic]:
+        """발행 확정 토픽만 LLM으로 headline/불릿 작문 (배치, in-place).
+
+        기계적 병합으로 다른 사건이 섞인 그룹은 LLM이 중심 사건 위주로 정리하고
+        무관한 post_ids를 덜어낼 수 있다. 실패한 배치는 결정적 초안을 유지한다.
+        """
+        if not topics:
+            return topics
+
+        post_map = {str(p.id): p for p in posts if p.id is not None}
+        batch_size = 20
+        num_batches = (len(topics) - 1) // batch_size + 1
+
+        for start in range(0, len(topics), batch_size):
+            batch = topics[start : start + batch_size]
+            payload = []
+            for i, t in enumerate(batch):
+                members = [post_map[str(pid)] for pid in (t.post_ids or []) if str(pid) in post_map]
+                payload.append({
+                    "index": i,
+                    "category": t.primary_category,
+                    "posts": [
+                        {
+                            "id": str(m.id),
+                            "source": m.source,
+                            "summary": m.summary or (m.content_text or "")[:200],
+                        }
+                        for m in members
+                    ],
+                })
+            prompt = COMPOSE_TOPICS.format(
+                topics_json=json.dumps(payload, ensure_ascii=False)
+            )
 
             try:
-                response_text = self._call_api(
-                    self._config.model_process, prompt, max_tokens=16384
+                response_text = await asyncio.to_thread(
+                    self._call_api, self._config.model_process, prompt, 8192
                 )
                 parsed = _parse_json_response(response_text)
-
-                for item in parsed:
-                    post_ids = item.get("post_ids", [])
-                    headline = item.get("headline", "")
-                    # 출력 검증: 모호한 headline의 catch-all 버킷만 개별 토픽으로 분해
-                    # (post_ids가 많아도 같은 사건 다출처 보도면 정당하므로 headline 내용으로만 판정)
-                    if _is_catch_all(headline, len(post_ids)):
-                        logger.warning(
-                            f"청크 {i+1}: catch-all 토픽 분해 — headline='{headline[:60]}', "
-                            f"post_count={len(post_ids)}"
-                        )
-                        for pid in post_ids:
-                            p = post_map.get(str(pid))
-                            if p is None:
-                                continue
-                            all_results.append(
-                                MergedTopic(
-                                    post_ids=[p.id],
-                                    headline=p.summary or (p.content_text or "")[:100],
-                                    body_bullets=[p.summary or (p.content_text or "")[:300]],
-                                    primary_category=p.category_names[0] if p.category_names else "Other",
-                                    importance_score=p.importance_score or 0.5,
-                                    sources=[p.source],
-                                    source_urls=[p.url] if p.url else [],
-                                )
-                            )
-                        continue
-
-                    all_results.append(
-                        MergedTopic(
-                            post_ids=post_ids,
-                            headline=headline,
-                            body_bullets=item.get("body_bullets", []),
-                            primary_category=item.get("primary_category", "Other"),
-                            importance_score=item.get("importance_score", 0.5),
-                            sources=item.get("sources", []),
-                            source_urls=item.get("source_urls", []),
-                        )
-                    )
-
+            except LLMBackendError:
+                raise  # 백엔드 장애는 상위(hybrid)로 — OpenAI 폴백 트리거
             except Exception as e:
-                logger.error(f"청크 {i+1} 중복제거/통합 API 호출 실패: {e}")
-                # 실패 시 해당 청크의 각 게시물을 개별 토픽으로
-                for p in chunk:
-                    all_results.append(
-                        MergedTopic(
-                            post_ids=[p.id] if p.id else [],
-                            headline=p.summary or (p.content_text or "")[:100],
-                            body_bullets=[p.summary or (p.content_text or "")[:300]],
-                            primary_category=p.category_names[0] if p.category_names else "Other",
-                            importance_score=p.importance_score or 0.5,
-                            sources=[p.source],
-                            source_urls=[p.url] if p.url else [],
-                        )
-                    )
+                logger.warning(f"발행 항목 작문 실패(결정적 초안 유지): {e}")
+                continue
 
-        num_chunks = (len(posts) - 1) // chunk_size + 1
-        logger.info(f"1차 중복제거: {len(posts)}건 → {len(all_results)}개 토픽 ({num_chunks}개 청크)")
+            by_index = {
+                item.get("index"): item for item in parsed if isinstance(item, dict)
+            }
+            for i, t in enumerate(batch):
+                item = by_index.get(i)
+                if not item:
+                    continue
+                headline = str(item.get("headline") or "").strip()
+                if headline and not _is_catch_all(headline, len(t.post_ids or [])):
+                    t.headline = headline
+                bullets = item.get("body_bullets")
+                if isinstance(bullets, list) and bullets:
+                    t.body_bullets = normalize_topic_bullets([str(b) for b in bullets if b])
+                # LLM이 무관 판정으로 덜어낸 post_ids 반영 (원래 멤버의 부분집합만 허용)
+                original_ids = {str(pid) for pid in (t.post_ids or [])}
+                kept_ids = [
+                    str(pid) for pid in (item.get("post_ids") or [])
+                    if str(pid) in original_ids
+                ]
+                if kept_ids and len(kept_ids) < len(original_ids):
+                    kept_posts = [post_map[pid] for pid in kept_ids if pid in post_map]
+                    if kept_posts:
+                        t.post_ids = kept_ids
+                        t.sources = list(dict.fromkeys(m.source for m in kept_posts))
+                        t.source_urls = list(dict.fromkeys(m.url for m in kept_posts if m.url))
 
-        # 2차: 전역 통합 — 토픽이 2개 이상이면 항상 실행(단일 청크여도)
-        if len(all_results) >= 2:
-            all_results = await self._consolidate_topics(all_results)
-
-        logger.info(f"최종 토픽 수: {len(all_results)}개")
-        return all_results
+        logger.info(f"발행 확정 토픽 작문: {len(topics)}건 (LLM 배치 {num_batches}회)")
+        return topics
 
     async def generate_curation(self, topics: list[MergedTopic], audience: str) -> Curation:
         """독자층 맞춤 큐레이션 생성 (1회 LLM 호출로 전체+카테고리별)."""
@@ -394,9 +493,13 @@ class BaseLLMProcessor:
         data = None
         for attempt in range(2):
             try:
-                response_text = self._call_api(self._config.model_process, prompt, max_tokens=4096)
+                response_text = await asyncio.to_thread(
+                    self._call_api, self._curation_model(), prompt, 8192
+                )
                 data = _parse_json_object(response_text)
                 break
+            except LLMBackendError:
+                raise  # 백엔드 장애는 상위(hybrid)로 — OpenAI 폴백 트리거
             except Exception as e:
                 logger.warning(f"큐레이션 생성 시도 {attempt + 1} 실패 (audience={audience}): {e}")
         if data is None:
@@ -570,8 +673,17 @@ class OpenAIProcessor(BaseLLMProcessor):
         self._client = OpenAI(api_key=api_key)
         self._config = config
 
+    def _curation_model(self) -> str:
+        # Curation needs reliable short JSON, not heavyweight reasoning.
+        return self._config.model_filter
+
     def _call_api(self, model: str, prompt: str, max_tokens: int = 4096) -> str:
-        """OpenAI Chat Completions API 동기 호출."""
+        """OpenAI Chat Completions API 동기 호출.
+
+        gpt-5 계열(추론 모델)은 추론 토큰이 completion 한도를 같이 소모해
+        content가 비어 올 수 있다 — 이 경우 한도를 2배로 올려 1회만 재시도하고,
+        그래도 비면 명시적 예외를 던져 호출부의 실패 처리(배치 스킵 등)를 태운다.
+        """
         is_legacy = "gpt-4o" in model
         params: dict = {
             "model": model,
@@ -585,8 +697,35 @@ class OpenAIProcessor(BaseLLMProcessor):
             params["temperature"] = 0.1
         else:
             params["max_completion_tokens"] = max_tokens
-        response = self._client.chat.completions.create(**params)
-        return response.choices[0].message.content or ""
+            # 분류/요약류 배치 작업엔 긴 추론이 불필요 — 추론 토큰(출력 과금) 절감
+            params["reasoning_effort"] = "low"
+
+        for attempt in range(2):
+            response = self._client.chat.completions.create(**params)
+            choice = response.choices[0]
+            content = choice.message.content or ""
+            # 비용 실측용 — 추론 토큰(출력 과금)이 지배 비용이라 호출마다 기록
+            usage = getattr(response, "usage", None)
+            if usage:
+                details = getattr(usage, "completion_tokens_details", None)
+                reasoning = getattr(details, "reasoning_tokens", 0) if details else 0
+                logger.info(
+                    f"[usage] model={model} in={usage.prompt_tokens} "
+                    f"out={usage.completion_tokens} (reasoning={reasoning})"
+                )
+            if content.strip():
+                return content
+            if is_legacy or attempt == 1:
+                break
+            logger.warning(
+                f"빈 응답(finish_reason={choice.finish_reason}, model={model}) — "
+                f"completion 한도 {max_tokens}→{max_tokens * 2}로 1회 재시도"
+            )
+            params["max_completion_tokens"] = max_tokens * 2
+
+        raise RuntimeError(
+            f"LLM 빈 응답 (model={model}, finish_reason={choice.finish_reason})"
+        )
 
     async def verify_claims(self, posts: list[Post]) -> list[VerificationResult]:
         """게시물의 핵심 주장을 웹 검색(DuckDuckGo)으로 교차 검증."""
@@ -598,7 +737,9 @@ class OpenAIProcessor(BaseLLMProcessor):
         prompt = EXTRACT_CLAIMS.format(posts_json=posts_json)
 
         try:
-            response_text = self._call_api(self._config.model_filter, prompt)
+            response_text = await asyncio.to_thread(
+                self._call_api, self._config.model_filter, prompt, 8192
+            )
             claims = _parse_json_response(response_text)
         except Exception as e:
             logger.warning(f"주장 추출 실패 (검증 스킵): {e}")
@@ -612,6 +753,14 @@ class OpenAIProcessor(BaseLLMProcessor):
             c for c in claims
             if c.get("needs_verification") and c.get("claim") and c.get("post_id")
         ]
+        # 웹검증 대상 상한 — Claude 경로(claude_code_processor)와 동일하게 적용해
+        # 검색 호출 수·검증 프롬프트 크기가 후보 수에 비례해 무한정 커지는 것을 막는다.
+        if len(claims_to_verify) > self._config.verify_max_claims:
+            logger.info(
+                "웹검증 주장 %s건 → 상한 %s건으로 컷",
+                len(claims_to_verify), self._config.verify_max_claims,
+            )
+            claims_to_verify = claims_to_verify[: self._config.verify_max_claims]
 
         if not claims_to_verify:
             logger.info("검증 필요한 주장 없음, 전체 통과")
@@ -626,7 +775,7 @@ class OpenAIProcessor(BaseLLMProcessor):
         verification_data = []
         search_failed = 0
         for claim_item in claims_to_verify:
-            search_results = self._web_search(claim_item["claim"])
+            search_results = await asyncio.to_thread(self._web_search, claim_item["claim"])
             if search_results is None:
                 search_failed += 1
                 continue
@@ -657,22 +806,25 @@ class OpenAIProcessor(BaseLLMProcessor):
         verified_ids: set = set()
 
         try:
-            response_text = self._call_api(self._config.model_filter, verify_prompt)
+            response_text = await asyncio.to_thread(
+                self._call_api, self._config.model_filter, verify_prompt, 8192
+            )
             parsed = _parse_json_response(response_text)
 
             for item in parsed:
+                # LLM이 post_id를 숫자로 echo해도 매칭되도록 str 정규화
                 results.append(VerificationResult(
-                    post_id=item["post_id"],
+                    post_id=str(item["post_id"]),
                     credibility=item.get("credibility", "unverified"),
                     reason=item.get("reason"),
                 ))
-                verified_ids.add(item["post_id"])
+                verified_ids.add(str(item["post_id"]))
         except Exception as e:
             logger.warning(f"신뢰도 판정 실패 (검증 스킵): {e}")
 
         # 검증 대상이 아닌 게시물은 verified로 처리
         for p in posts:
-            if p.id not in verified_ids:
+            if str(p.id) not in verified_ids:
                 results.append(VerificationResult(
                     post_id=p.id, credibility="verified"
                 ))

@@ -7,10 +7,10 @@
 from __future__ import annotations
 
 from src.domain.entities import Briefing
-from src.domain.services.ai_processor import Curation
-from src.infrastructure.delivery.categories import CATEGORY_EMOJI, CATEGORY_KO
+from src.domain.services.ai_processor import Curation, normalize_topic_bullets
+from src.infrastructure.delivery.categories import CATEGORY_EMOJI, CATEGORY_KO, VALID_BRIEFING_CATEGORIES
 
-CAT_ORDER = ["AI", "Semiconductor", "Cloud", "BigTech", "Startup", "Regulation", "Coding", "Showcase"]
+CAT_ORDER = list(VALID_BRIEFING_CATEGORIES)
 # 이모지 + 한국어 라벨 (단일 소스에서 조합)
 CAT_LABEL = {
     key: f"{CATEGORY_EMOJI.get(key, '')} {ko}".strip()
@@ -42,7 +42,9 @@ def render_email_html(briefing: Briefing, curation: Curation, logo_src: str,
 
     by_cat: dict[str, list] = {}
     for it in briefing.items:
-        by_cat.setdefault(it.category_name or "AI", []).append(it)
+        if it.category_name not in VALID_BRIEFING_CATEGORIES:
+            continue
+        by_cat.setdefault(it.category_name, []).append(it)
     for v in by_cat.values():
         v.sort(key=lambda x: x.importance_score or 0, reverse=True)
 
@@ -69,7 +71,7 @@ def render_email_html(briefing: Briefing, curation: Curation, logo_src: str,
 </div>""")
 
     cats = curation.categories if curation else {}
-    for cat in CAT_ORDER + [c for c in by_cat if c not in CAT_ORDER]:
+    for cat in CAT_ORDER:
         its = by_cat.get(cat, [])
         if not its:
             continue
@@ -84,9 +86,10 @@ def render_email_html(briefing: Briefing, curation: Curation, logo_src: str,
       <div style="font-size:14px;font-weight:700;color:#1d4ed8;margin-bottom:7px;">“{_esc(cc.hook)}”</div>{bl}{ins}</div>""")
         for it in its:
             # 구조화 불릿 우선, 없으면(구버전) body에서 폴백
-            lines = list(it.body_bullets) if it.body_bullets else [
+            raw_lines = list(it.body_bullets) if it.body_bullets else [
                 l.strip().lstrip("- ").strip() for l in (it.body or "").split("\n") if l.strip()
             ]
+            lines = normalize_topic_bullets(raw_lines)
             bh = "".join(f'<div style="font-size:13.5px;line-height:1.72;color:#475467;margin:0 0 5px;padding-left:15px;text-indent:-9px;"><span style="color:#cdd3dc;">•</span> {_esc(l)}</div>' for l in lines)
             urls = it.source_urls or []
             chips = "".join(f'<a href="{u}" style="display:inline-block;background:#f1f5fb;color:#3b82f6;font-size:11px;font-weight:600;padding:4px 11px;border-radius:999px;text-decoration:none;margin:0 6px 6px 0;">원문 {i}</a>' for i, u in enumerate(urls, 1))

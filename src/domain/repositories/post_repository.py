@@ -55,6 +55,14 @@ class PostRepository(Protocol):
         """N일 이상 된 게시물 삭제. 삭제 건수 반환."""
         ...
 
+    def delete_irrelevant_older_than(self, days: int) -> int:
+        """필터 탈락(is_relevant=0) 게시물 중 N일간 재수집되지 않은 것 삭제.
+
+        재수집 창(max_age_days)보다 긴 일수를 줘야 삭제→재수집→재필터링
+        루프가 생기지 않는다. 삭제 건수 반환.
+        """
+        ...
+
     def count(self) -> int:
         """전체 게시물 수."""
         ...
@@ -103,4 +111,8 @@ class PostRepository(Protocol):
 
     async def mark_briefed(self, post_ids: list[str], briefed_at: datetime) -> int:
         """게시물들의 briefed_at 설정 (브리핑 완료 마킹)."""
+        ...
+
+    async def delete_low_importance(self, max_score: float) -> int:
+        """브리핑 완료된 게시물 중 중요도가 max_score 이하인 것을 삭제. 삭제 건수 반환."""
         ...
