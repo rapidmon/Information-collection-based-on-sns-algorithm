@@ -216,6 +216,15 @@ class Container:
             )
             results[persona or "default"] = {"sent": ok, "recipients": len(addrs)}
 
+        # 발송 성공 그룹이 하나라도 있으면 발송 완료 마킹 (대시보드 '이메일 전송됨' 표시)
+        if any(r.get("sent") for r in results.values()) and briefing.id:
+            try:
+                briefing.email_sent = True
+                briefing.email_sent_at = datetime.utcnow()
+                await self.briefing_repo.update(briefing)
+            except Exception as e:
+                results["email_sent_mark_error"] = str(e)
+
         # 슬랙 게시 — 이메일과 독립적으로 시도 (실패해도 이메일 결과에 영향 없음)
         if self.slack_notifier.is_configured:
             try:
