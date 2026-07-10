@@ -106,13 +106,15 @@ class Orchestrator:
             v_hour, v_minute = map(int, scfg.vote_close_time.split(":"))
             self.scheduler.add_job(
                 self._run_slack_vote_winner,
-                trigger=CronTrigger(hour=v_hour, minute=v_minute),
+                trigger=CronTrigger(
+                    hour=v_hour, minute=v_minute, day_of_week=scfg.vote_days
+                ),
                 id="slack_vote_winner",
                 name="Slack Vote Winner",
                 max_instances=1,
                 misfire_grace_time=600,
             )
-            logger.info(f"슬랙 투표 집계 등록: {scfg.vote_close_time}")
+            logger.info(f"슬랙 투표 집계 등록: {scfg.vote_close_time} ({scfg.vote_days})")
 
         # ─── 헬스체크 (5분마다) ───
         self.scheduler.add_job(

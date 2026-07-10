@@ -41,6 +41,9 @@ class Settings(BaseSettings):
 
     # Slack 브리핑 발송용 Bot Token (xoxb-...). 필요 스코프: chat:write, reactions:write
     slack_bot_token: str = ""
+    # Slack Events API 서명 검증용 Signing Secret (앱 Basic Information에서 확인).
+    # 비워두면 @멘션 이벤트 수신이 비활성화된다 (공개 엔드포인트 보호).
+    slack_signing_secret: str = ""
 
     # SNS Credentials (auto-login)
     twitter_username: str = ""
@@ -157,6 +160,8 @@ class SlackConfig:
         # ─ 투표 집계 → 1위 항목 심층 글 생성 ─
         # 집계 실행 시각 (HH:MM). winner_prompt가 비어 있으면 기능 전체 비활성.
         self.vote_close_time: str = data.get("vote_close_time", "12:00")
+        # 집계 실행 요일 (APScheduler day_of_week 형식). 주말엔 투표를 안 하므로 기본 평일만.
+        self.vote_days: str = data.get("vote_days", "mon-fri")
         # 1위 항목에 돌릴 프롬프트 템플릿. 플레이스홀더:
         #   {headline} {bullets} {category} {sources} {posts} {date}
         self.winner_prompt: str = data.get("winner_prompt", "")

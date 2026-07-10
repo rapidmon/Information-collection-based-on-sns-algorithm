@@ -16,8 +16,12 @@ Slack Web API(chat.postMessage, reactions.add, reactions.get)를 httpx로 직접
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import json
 import logging
+import re
+import time
 from pathlib import Path
 
 import httpx
@@ -90,6 +94,55 @@ def build_item_text(item) -> str:
     if urls:
         lines.append(" · ".join(f"<{u}|출처{i + 1}>" for i, u in enumerate(urls)))
     return "\n".join(lines)
+
+
+def verify_slack_signature(secret: str, timestamp: str, body: bytes, signature: str) -> bool:
+    """Slack Events API 요청 서명 검증 (v0 스킴, 5분 리플레이 윈도우)."""
+    if not (secret and timestamp and signature):
+        return False
+    try:
+        if abs(time.time() - float(timestamp)) > 300:
+            return False
+    except ValueError:
+        return False
+    base = f"v0:{timestamp}:".encode() + body
+    expected = "v0=" + hmac.new(secret.encode(), base, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, signature)
+
+
+# 브리핑 항목의 [카테고리] 프리픽스 역매핑 (한국어 라벨 → 키)
+_KO_TO_CATEGORY = {v: k for k, v in CATEGORY_KO.items()}
+
+
+def parse_pasted_post(text: str) -> dict:
+    """@멘션으로 붙여넣은 브리핑 항목 텍스트를 winner_prompt 입력 dict로 변환.
+
+    첫 줄=헤드라인, 불릿 기호로 시작하는 줄=요약 불릿, URL은 출처로 수집.
+    '[코딩] ...' 형태의 카테고리 프리픽스는 카테고리로 역매핑.
+    """
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    headline = lines[0] if lines else text.strip()[:120]
+
+    category = ""
+    m = re.match(r"^(?::\w+:\s*)?\[([^\]]+)\]\s*(.*)", headline)
+    if m:
+        category = _KO_TO_CATEGORY.get(m.group(1), m.group(1))
+        headline = m.group(2) or headline
+
+    bullets = [
+        ln.lstrip("•-·▪ ").strip()
+        for ln in lines[1:]
+        if ln.startswith(("•", "-", "·", "▪"))
+    ]
+    urls = re.findall(r"https?://[^\s>|]+", text)
+
+    return {
+        "headline": headline,
+        "category": category,
+        "bullets": bullets,
+        "source_urls": urls,
+        "source_post_ids": [],
+    }
 
 
 def _split_chunks(text: str, size: int) -> list[str]:
@@ -359,15 +412,20 @@ class SlackNotifier:
                     it["up"], it["down"] = 0, 0
         return state
 
-    async def post_message(self, text: str, thread_ts: str | None = None) -> dict:
-        """채널(또는 스레드)에 텍스트 게시. 길면 첫 조각만 본문, 나머지는 그 스레드에."""
+    async def post_message(
+        self, text: str, thread_ts: str | None = None, channel: str | None = None
+    ) -> dict:
+        """채널(또는 스레드)에 텍스트 게시. 길면 첫 조각만 본문, 나머지는 그 스레드에.
+
+        channel 미지정 시 설정 채널 사용 (@멘션 답장은 이벤트의 채널로 지정).
+        """
         chunks = _split_chunks(text, MESSAGE_CHUNK_CHARS)
         async with httpx.AsyncClient(
             timeout=30.0,
             headers={"Authorization": f"Bearer {self._token}"},
         ) as client:
             payload = {
-                "channel": self._config.channel,
+                "channel": channel or self._config.channel,
                 "text": chunks[0],
                 "unfurl_links": False,
                 "unfurl_media": False,

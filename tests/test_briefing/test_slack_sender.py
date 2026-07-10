@@ -14,9 +14,11 @@ from src.infrastructure.delivery.slack_sender import (
     _split_chunks,
     build_header_text,
     build_item_text,
+    parse_pasted_post,
     pick_winner,
     pick_winners,
     render_winner_prompt,
+    verify_slack_signature,
 )
 
 
@@ -294,6 +296,47 @@ def test_render_appends_input_block_when_no_placeholders():
     out = render_winner_prompt(template, item, "원본텍스트", "2026. 07. 09")
     assert "제목: 토큰 절감 플러그인" in out
     assert "원본텍스트" in out
+
+
+# ──────────────────────────────────────────
+# @멘션 게시물 파싱 · 이벤트 서명 검증
+# ──────────────────────────────────────────
+
+def test_parse_pasted_post_extracts_fields():
+    text = (
+        ":computer: [코딩] Claude Code 토큰 절감용 플러그인 3종 공개\n"
+        "• Claude Code 사용 시 토큰 소비를 줄이기 위한 플러그인 3개를 소개\n"
+        "• 토큰 최적화를 목적으로 한 확장 도구 정보 공유\n"
+        "출처: https://x.com/i/web/status/123"
+    )
+    item = parse_pasted_post(text)
+    assert item["headline"] == "Claude Code 토큰 절감용 플러그인 3종 공개"
+    assert item["category"] == "Coding"  # [코딩] → 키 역매핑
+    assert len(item["bullets"]) == 2
+    assert item["source_urls"] == ["https://x.com/i/web/status/123"]
+
+
+def test_parse_pasted_post_plain_text_fallback():
+    item = parse_pasted_post("그냥 한 줄짜리 소식")
+    assert item["headline"] == "그냥 한 줄짜리 소식"
+    assert item["category"] == ""
+    assert item["bullets"] == []
+
+
+def test_verify_slack_signature_roundtrip():
+    import hashlib
+    import hmac
+    import time as _time
+
+    secret = "test-secret"
+    ts = str(int(_time.time()))
+    body = b'{"type":"event_callback"}'
+    sig = "v0=" + hmac.new(secret.encode(), f"v0:{ts}:".encode() + body, hashlib.sha256).hexdigest()
+
+    assert verify_slack_signature(secret, ts, body, sig) is True
+    assert verify_slack_signature(secret, ts, body, "v0=bad") is False
+    assert verify_slack_signature(secret, "1000000000", body, sig) is False  # 오래된 타임스탬프
+    assert verify_slack_signature("", ts, body, sig) is False  # 시크릿 미설정
 
 
 def test_split_chunks_respects_line_boundaries():

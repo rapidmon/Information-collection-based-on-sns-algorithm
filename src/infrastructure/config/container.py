@@ -330,3 +330,55 @@ class Container:
             "no_votes": no_votes,
             "winners": results,
         }
+
+    async def run_slack_mention(self, text: str, channel: str, thread_ts: str) -> None:
+        """@멘션으로 붙여넣은 게시물에 winner_prompt(+캡션)를 돌려 스레드로 답장.
+
+        주말 등 투표 집계가 없는 날, 사용자가 직접 고른 게시물을 처리하는 경로.
+        처리에 1~3분 걸리므로 즉시 안내 답장을 먼저 남긴다.
+        """
+        from src.infrastructure.delivery.slack_sender import parse_pasted_post, render_winner_prompt
+
+        scfg = self.config.slack
+        if not scfg.winner_prompt.strip():
+            await self.slack_notifier.post_message(
+                "winner_prompt가 설정돼 있지 않아 처리할 수 없어요 (config/settings.yaml).",
+                thread_ts=thread_ts, channel=channel,
+            )
+            return
+        try:
+            item = parse_pasted_post(text)
+            if not item.get("headline"):
+                await self.slack_notifier.post_message(
+                    "게시물 텍스트를 함께 붙여넣어 주세요! (멘션 뒤에 헤드라인·요약을 그대로 복사)",
+                    thread_ts=thread_ts, channel=channel,
+                )
+                return
+
+            await self.slack_notifier.post_message(
+                f"⏳ 받았습니다 — \"{item['headline'][:50]}\" 카드뉴스 타이틀·캡션 생성 중이에요 (1~3분)",
+                thread_ts=thread_ts, channel=channel,
+            )
+
+            posts_text = text  # 붙여넣은 원문 전체를 원본 게시물로 전달
+            date_str = datetime.now(ZoneInfo(self.config.timezone)).strftime("%Y. %m. %d")
+
+            body = await self.claude_processor.run_freeform(
+                render_winner_prompt(scfg.winner_prompt, item, posts_text, date_str),
+                websearch=scfg.winner_websearch,
+            )
+            if scfg.caption_prompt.strip():
+                caption = await self.claude_processor.run_freeform(
+                    render_winner_prompt(scfg.caption_prompt, item, posts_text, date_str),
+                    websearch=scfg.winner_websearch,
+                )
+                body += f"\n\n──────────\n{caption}"
+
+            await self.slack_notifier.post_message(body, thread_ts=thread_ts, channel=channel)
+        except Exception as e:
+            try:
+                await self.slack_notifier.post_message(
+                    f"⚠️ 생성 실패: {str(e)[:200]}", thread_ts=thread_ts, channel=channel,
+                )
+            except Exception:
+                pass
