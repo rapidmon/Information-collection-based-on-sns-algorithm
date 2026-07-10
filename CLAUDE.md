@@ -90,8 +90,3 @@ APScheduler `Orchestrator`가 등록: 소스별 수집(interval), AI 처리(시�
 - 도메인 경계는 `Protocol`로 정의하고 인프라에서 구현 — 구체 클래스를 use case가 직접 import하지 않는다.
 - 주석·로그·docstring은 한국어.
 - I/O 경계는 async (`asyncio.run`으로 진입, Playwright/FastAPI/aiosmtplib 모두 async). SQLite 레포는 동기 호출도 섞여 있으니 시그니처를 확인할 것.
-
-## Latest Session
-- Date: 2026-03-21
-- Summary: .claude/context/session-2026-03-21-2.md
-- Status: ✅ 브리핑 시스템 완성 — 버그 수정, 중요도 0.7 필터, 40개 토픽 이메일 발송 완료
