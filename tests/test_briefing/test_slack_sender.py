@@ -15,6 +15,7 @@ from src.infrastructure.delivery.slack_sender import (
     build_header_text,
     build_item_text,
     pick_winner,
+    pick_winners,
     render_winner_prompt,
 )
 
@@ -210,6 +211,28 @@ async def test_tally_votes_subtracts_bot_reactions(monkeypatch, tmp_path):
     assert (tally["items"][1]["up"], tally["items"][1]["down"]) == (0, 2)
 
 
+async def test_tally_merges_skin_tone_variants(monkeypatch, tmp_path):
+    """피부톤 이모지(+1::skin-tone-N)로 투표한 표도 합산된다 (2026-07-10 오집계 재발 방지)."""
+    notifier = _notifier(state_path=tmp_path / "state.json")
+    monkeypatch.setattr(slack_sender, "TALLY_INTERVAL_SECONDS", 0)
+    notifier._save_state({
+        "date_str": "d", "channel_id": "C123", "thread_ts": "h",
+        "items": [{"ts": "ts-1", "headline": "A"}],
+    })
+
+    async def fake_call(client, method, payload, **kw):
+        return {"ok": True, "message": {"reactions": [
+            {"name": "+1", "count": 3},                 # 봇1 + 실투표2
+            {"name": "+1::skin-tone-2", "count": 1},    # 피부톤 실투표1
+            {"name": "-1", "count": 1},                 # 봇만
+        ]}}
+
+    monkeypatch.setattr(notifier, "_call", fake_call)
+
+    tally = await notifier.tally_votes()
+    assert (tally["items"][0]["up"], tally["items"][0]["down"]) == (3, 0)
+
+
 def test_pick_winner_by_net_votes_then_importance():
     items = [
         {"headline": "A", "up": 3, "down": 2, "importance": 0.9},   # 순득표 1
@@ -229,6 +252,29 @@ def test_pick_winner_falls_back_to_importance_when_no_votes():
     winner = pick_winner(items)
     assert winner["headline"] == "B"
     assert winner["no_votes"] is True
+
+
+def test_pick_winners_returns_all_ties_sorted_by_importance():
+    items = [
+        {"headline": "A", "up": 3, "down": 0, "importance": 0.9},
+        {"headline": "B", "up": 3, "down": 0, "importance": 1.0},
+        {"headline": "C", "up": 4, "down": 1, "importance": 0.5},  # 순득표 3 동률
+        {"headline": "D", "up": 1, "down": 0, "importance": 0.99},
+    ]
+    winners = pick_winners(items)
+    assert [w["headline"] for w in winners] == ["B", "A", "C"]
+    assert all(w["no_votes"] is False for w in winners)
+
+
+def test_pick_winners_no_votes_returns_single_importance_fallback():
+    items = [
+        {"headline": "A", "up": 0, "down": 0, "importance": 0.7},
+        {"headline": "B", "up": 0, "down": 0, "importance": 0.95},
+    ]
+    winners = pick_winners(items)
+    assert len(winners) == 1
+    assert winners[0]["headline"] == "B"
+    assert winners[0]["no_votes"] is True
 
 
 def test_render_winner_prompt_replaces_placeholders_safely():

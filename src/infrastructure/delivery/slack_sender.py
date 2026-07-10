@@ -112,27 +112,27 @@ def _split_chunks(text: str, size: int) -> list[str]:
     return chunks
 
 
-def pick_winner(items: list[dict]) -> dict | None:
-    """집계된 항목 중 1위 선정.
+def pick_winners(items: list[dict]) -> list[dict]:
+    """순득표(up-down) 최고 동률 항목을 전부 반환 (중요도 내림차순 정렬).
 
-    순득표(up-down) → 찬성수 → 중요도 순으로 비교한다.
-    투표가 하나도 없으면 중요도 최고 항목을 no_votes 플래그와 함께 반환.
+    투표가 하나도 없으면 중요도 최고 항목 1건만 no_votes 플래그와 함께 반환.
     """
     if not items:
-        return None
+        return []
     total_votes = sum(it.get("up", 0) + it.get("down", 0) for it in items)
     if total_votes == 0:
         winner = max(items, key=lambda it: it.get("importance", 0))
-        return {**winner, "no_votes": True}
-    winner = max(
-        items,
-        key=lambda it: (
-            it.get("up", 0) - it.get("down", 0),
-            it.get("up", 0),
-            it.get("importance", 0),
-        ),
-    )
-    return {**winner, "no_votes": False}
+        return [{**winner, "no_votes": True}]
+    best = max(it.get("up", 0) - it.get("down", 0) for it in items)
+    winners = [it for it in items if it.get("up", 0) - it.get("down", 0) == best]
+    winners.sort(key=lambda it: -(it.get("importance") or 0))
+    return [{**w, "no_votes": False} for w in winners]
+
+
+def pick_winner(items: list[dict]) -> dict | None:
+    """1위 1건만 필요할 때의 편의 함수 (동률이면 중요도 최고)."""
+    winners = pick_winners(items)
+    return winners[0] if winners else None
 
 
 # winner_prompt에 플레이스홀더가 하나도 없을 때 자동으로 덧붙이는 입력 블록.
@@ -345,10 +345,12 @@ class SlackNotifier:
                         "timestamp": it["ts"],
                         "full": True,
                     }, http_get=True)
-                    counts = {
-                        r.get("name"): r.get("count", 0)
-                        for r in (data.get("message", {}).get("reactions") or [])
-                    }
+                    # 피부톤 변형("+1::skin-tone-2" 등)은 별도 리액션으로 오므로
+                    # 베이스 이름으로 합산한다 — 안 하면 피부톤 설정 사용자의 표가 누락됨
+                    counts: dict[str, int] = {}
+                    for r in (data.get("message", {}).get("reactions") or []):
+                        base = (r.get("name") or "").split("::")[0]
+                        counts[base] = counts.get(base, 0) + r.get("count", 0)
                     # 봇 선부착분 1개 차감
                     it["up"] = max(0, counts.get(up_name, 0) - 1)
                     it["down"] = max(0, counts.get(down_name, 0) - 1)

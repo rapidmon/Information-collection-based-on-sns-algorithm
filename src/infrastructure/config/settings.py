@@ -160,6 +160,9 @@ class SlackConfig:
         # 1위 항목에 돌릴 프롬프트 템플릿. 플레이스홀더:
         #   {headline} {bullets} {category} {sources} {posts} {date}
         self.winner_prompt: str = data.get("winner_prompt", "")
+        # 본문 캡션용 추가 프롬프트 (선택). 결과는 타이틀 메시지의 스레드에 게시.
+        # winner_prompt가 있어야 동작하며, 같은 플레이스홀더 사용.
+        self.caption_prompt: str = data.get("caption_prompt", "")
         # 프롬프트 실행 시 Claude WebSearch 허용 여부
         self.winner_websearch: bool = data.get("winner_websearch", True)
         # 게시된 항목 ts↔항목 매핑 저장 파일 (집계 잡이 읽음, 매일 덮어씀)

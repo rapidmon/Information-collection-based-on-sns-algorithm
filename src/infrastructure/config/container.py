@@ -225,13 +225,15 @@ class Container:
         return results
 
     async def run_slack_vote_winner(self) -> dict:
-        """슬랙 투표 집계 → 1위 항목에 winner_prompt 실행 → 결과 채널 게시.
+        """슬랙 투표 집계 → 순득표 1위(동률 전부)에 프롬프트 실행 → 채널 게시.
 
-        투표가 하나도 없으면 중요도 최고 항목으로 폴백하고 메시지에 그 사실을 밝힌다.
+        헤더 메시지에 1위 항목들을 나열하고, 각 항목의 카드뉴스 타이틀·캡션
+        결과물은 헤더의 스레드 댓글로 하나씩 단다.
+        투표가 하나도 없으면 중요도 최고 1건으로 폴백하고 그 사실을 밝힌다.
         오늘 게시분이 아니면(서버 재시작 등으로 상태가 오래됨) 아무것도 하지 않는다.
         """
         from src.infrastructure.delivery.categories import CATEGORY_EMOJI, CATEGORY_KO
-        from src.infrastructure.delivery.slack_sender import pick_winner, render_winner_prompt
+        from src.infrastructure.delivery.slack_sender import pick_winners, render_winner_prompt
 
         scfg = self.config.slack
         if not (self.slack_notifier.is_configured and scfg.winner_prompt.strip()):
@@ -246,42 +248,70 @@ class Container:
         if tally.get("date_str") != today:
             return {"run": False, "reason": f"stale_state({tally.get('date_str')})"}
 
-        winner = pick_winner(tally["items"])
-        if winner is None:
+        winners = pick_winners(tally["items"])
+        if not winners:
             return {"run": False, "reason": "no_items"}
+        no_votes = winners[0].get("no_votes", False)
 
-        # 원본 게시물 본문 수집 (브리핑 후 정리로 삭제됐을 수 있어 있는 것만)
-        posts_lines = []
-        for pid in (winner.get("source_post_ids") or [])[:5]:
+        def _label(w: dict) -> str:
+            cat = w.get("category") or "Other"
+            return (
+                f"{CATEGORY_EMOJI.get(cat, '🗂')} "
+                f"[{CATEGORY_KO.get(cat, cat)}] {w.get('headline', '')}"
+            )
+
+        # ── 헤더: 1위 항목 전부 나열 ──
+        if no_votes:
+            title = "🏆 *오늘의 투표 1위* — 투표 없음, 중요도 기준 1건"
+        elif len(winners) > 1:
+            score = winners[0].get("up", 0) - winners[0].get("down", 0)
+            title = f"🏆 *오늘의 투표 1위* — 순득표 {score} 동률 {len(winners)}건"
+        else:
+            title = f"🏆 *오늘의 투표 1위* — 👍 {winners[0].get('up', 0)}"
+        lines = [title]
+        for i, w in enumerate(winners, 1):
+            vote = "" if no_votes else f" (👍{w.get('up', 0)}·👎{w.get('down', 0)})"
+            lines.append(f"{i}. {_label(w)}{vote}")
+        lines.append("_각 항목의 카드뉴스 타이틀·캡션 결과물은 이 스레드에 달려 있어요_")
+        head = await self.slack_notifier.post_message("\n".join(lines))
+
+        # ── 항목별 결과물을 스레드 댓글로 하나씩 ──
+        results = []
+        for w in winners:
             try:
-                p = self.post_repo.find_by_id(str(pid))
-            except Exception:
-                p = None
-            if p is not None and getattr(p, "content", None):
-                posts_lines.append(f"[{p.source}] {p.content[:1500]}")
-        posts_text = "\n\n".join(posts_lines) if posts_lines else "(원본 게시물 없음)"
+                posts_lines = []
+                for pid in (w.get("source_post_ids") or [])[:5]:
+                    try:
+                        p = self.post_repo.find_by_id(str(pid))
+                    except Exception:
+                        p = None
+                    if p is not None and getattr(p, "content", None):
+                        posts_lines.append(f"[{p.source}] {p.content[:1500]}")
+                posts_text = "\n\n".join(posts_lines) if posts_lines else "(원본 게시물 없음)"
 
-        prompt = render_winner_prompt(scfg.winner_prompt, winner, posts_text, tally["date_str"])
-        text = await self.claude_processor.run_freeform(
-            prompt, websearch=scfg.winner_websearch
-        )
+                prompt = render_winner_prompt(
+                    scfg.winner_prompt, w, posts_text, tally["date_str"]
+                )
+                body = f"🎯 *{_label(w)}*\n\n"
+                body += await self.claude_processor.run_freeform(
+                    prompt, websearch=scfg.winner_websearch
+                )
+                if scfg.caption_prompt.strip():
+                    caption_prompt = render_winner_prompt(
+                        scfg.caption_prompt, w, posts_text, tally["date_str"]
+                    )
+                    caption = await self.claude_processor.run_freeform(
+                        caption_prompt, websearch=scfg.winner_websearch
+                    )
+                    body += f"\n\n──────────\n{caption}"
+                await self.slack_notifier.post_message(body, thread_ts=head.get("ts"))
+                results.append({"headline": w.get("headline"), "posted": True})
+            except Exception as e:
+                # 한 항목 실패가 나머지 결과물 게시를 막지 않게 한다
+                results.append({"headline": w.get("headline"), "posted": False, "error": str(e)})
 
-        cat = winner.get("category") or "Other"
-        vote_note = (
-            "투표 없음 — 중요도 기준 선정" if winner.get("no_votes")
-            else f"👍 {winner.get('up', 0)} · 👎 {winner.get('down', 0)}"
-        )
-        header = (
-            f"🏆 *오늘의 투표 1위* — "
-            f"{CATEGORY_EMOJI.get(cat, '🗂')} [{CATEGORY_KO.get(cat, cat)}] "
-            f"{winner.get('headline', '')} ({vote_note})"
-        )
-        await self.slack_notifier.post_message(f"{header}\n\n{text}")
         return {
             "run": True,
-            "winner": winner.get("headline"),
-            "up": winner.get("up", 0),
-            "down": winner.get("down", 0),
-            "no_votes": winner.get("no_votes", False),
-            "text": text,
+            "no_votes": no_votes,
+            "winners": results,
         }
