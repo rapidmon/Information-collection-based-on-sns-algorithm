@@ -1,8 +1,8 @@
 # SNS Tech Briefing
 
-SNS(X, Threads, LinkedIn, DCInside) 알고리즘 피드에서 기술 뉴스를 자동 수집하고, AI가 요약/분류하여 **매일 아침 이메일 브리핑**을 보내주는 시스템입니다.
+SNS(X, Threads, LinkedIn, DCInside)와 뉴스 소스(36kr, Product Hunt)에서 기술 뉴스를 자동 수집하고, AI가 필터·검증·요약/분류하여 **매일 아침 이메일 브리핑(Morning Commit)**을 보내주는 시스템입니다.
 
-평소 팔로우하는 정보성 계정들의 피드를 AI가 읽고, 중요한 것만 골라 한국어로 정리해줍니다.
+평소 팔로우하는 정보성 계정들의 피드를 AI가 읽고, 중요한 것만 골라 한국어로 정리해줍니다. 독자층(개발자·디자이너 등)별로 큐레이션 리드를 달리해 발송할 수도 있습니다.
 
 ---
 
@@ -17,18 +17,22 @@ SNS(X, Threads, LinkedIn, DCInside) 알고리즘 피드에서 기술 뉴스를 �
 ## 동작 방식
 
 ```
-1. 수집 (10분마다)
+1. 수집 (SNS 20분 / DCInside 60분 / 36kr 30분 / Product Hunt 120분)
    로그인된 Chrome에서 SNS 피드를 자동 스크롤하며 게시물 수집
+   (36kr·Product Hunt는 브라우저 없이 HTTP 수집)
 
-2. AI 분석 (30분마다)
-   GPT-4o-mini가 각 게시물을 분석:
-   - 기술 관련 여부 필터링 (일상/밈/잡담 제거)
-   - 한국어 요약 생성
-   - 카테고리 분류 (AI, 반도체, 클라우드 등 7개)
-   - 중요도 점수 산정 (뉴스 가치 + 실무 활용도)
+2. AI 분석 (60분마다, 하이브리드 백엔드)
+   - 기술 관련 여부 필터링 (일상/밈/잡담 제거) + 한국어 요약
+   - 웹 검색 교차검증으로 스캠/허위 게시물 제거
+   - 카테고리 분류 (AI, 반도체, 클라우드 등 8개) + 중요도 산정
+   - 고빈도 배치(필터·분류·검증)는 OpenAI, 품질 민감한 작문·큐레이션은 Claude 사용
+   - AI 처리 후 중요 게시물엔 자동 좋아요(선택 기능)
 
-3. 브리핑 발송 (매일 오전 9시)
-   중요도 높은 게시물을 모아 중복 제거 후 이메일로 발송
+3. 브리핑 발송 (매일 오전 8시)
+   - 같은 사건 게시물을 결정적 클러스터링으로 병합 (LLM 미사용, 토큰 $0)
+   - 카테고리별 상대평가로 상위 항목만 선별, 상위 후보는 웹검증 한 번 더
+   - 발행 확정 항목만 LLM이 헤드라인·불릿 작문
+   - 독자층(페르소나)별 큐레이션 리드를 붙여 그룹별 이메일 발송
 ```
 
 ---
@@ -39,7 +43,8 @@ SNS(X, Threads, LinkedIn, DCInside) 알고리즘 피드에서 기술 뉴스를 �
 
 - **Python 3.12 이상** ([다운로드](https://www.python.org/downloads/))
 - **Google Chrome** (이미 설치되어 있을 가능성이 높음)
-- **OpenAI API 키** ([발급 방법](https://platform.openai.com/api-keys)) — 월 $2~5 수준
+- **OpenAI API 키** ([발급 방법](https://platform.openai.com/api-keys)) — 필터/분류/검증용, 월 $2~5 수준
+- **Claude Code CLI** (선택이지만 권장) — 브리핑 작문·큐레이션용. 구독 로그인만 돼 있으면 API 키 불필요, 없으면 OpenAI로 자동 폴백
 - **Gmail 계정** — 브리핑 이메일 발송용
 
 ### 1단계: 프로젝트 다운로드
@@ -79,6 +84,9 @@ EMAIL_FROM=your@gmail.com
 # FIREBASE_CREDENTIAL_PATH=firebase-service-account.json
 # FIREBASE_PROJECT_ID=your-project-id
 
+# Claude Code를 다른 머신/서비스 컨텍스트에서 쓸 때만 필요 (본인 머신에서 claude 로그인돼 있으면 생략)
+# CLAUDE_CODE_OAUTH_TOKEN=...
+
 # SNS 계정 정보 (수집할 플랫폼만 입력)
 TWITTER_USERNAME=your-handle
 TWITTER_PASSWORD=your-password
@@ -97,6 +105,17 @@ email:
   enabled: true
   to_addresses:
     - "your-email@example.com"
+```
+
+독자층별로 큐레이션을 달리해 보내고 싶으면 `audiences`에 페르소나별 수신자를 지정합니다 (지정 시 `to_addresses` 대신 사용).
+
+```yaml
+email:
+  audiences:
+    "국내 개발자":
+      - "dev@example.com"
+    "UX·프로덕트·비주얼 디자인 실무자":
+      - "designer@example.com"
 ```
 
 ### 5단계: Chrome 디버그 모드 실행
@@ -134,9 +153,11 @@ python main.py serve
 ```
 
 끝입니다! 서버가 시작되면 자동으로:
-- 10분마다 SNS 피드 수집
-- 30분마다 AI 분석 처리
-- 매일 오전 9시에 브리핑 이메일 발송
+- SNS 피드 수집 (소스별 20~120분, CDP 충돌 방지를 위해 2분씩 시차 실행)
+- 60분마다 AI 분석 처리 (+처리 후 자동 좋아요)
+- 매일 오전 8시에 브리핑 이메일 발송
+- 5분마다 헬스체크 (수집 연속 3회 실패 시 관리자 알림 메일)
+- 매일 자정 30일 이상 된 게시물 자동 정리
 
 ---
 
@@ -156,7 +177,13 @@ collection:
     enabled: false    # 미사용
   dcinside:
     enabled: false    # 미사용
+  36kr:
+    enabled: true     # 중국 산업/AI 뉴스플래시 (HTTP, 로그인 불필요)
+  producthunt:
+    enabled: true     # AI 제품 런칭·쇼케이스 (RSS, 로그인 불필요)
 ```
+
+전역 `collection.max_age_days`(기본 2일)보다 오래된 게시물은 수집 단계에서 걸러집니다.
 
 ### DCInside 갤러리 변경
 
@@ -174,24 +201,39 @@ DCInside는 특정 갤러리의 게시물을 수집합니다. 관심 갤러리�
 ```yaml
 collection:
   twitter:
-    interval_minutes: 10    # 기본 10분, 원하는 간격으로 변경
+    interval_minutes: 20    # 원하는 간격으로 변경
+    scroll_rounds: 5        # 1회 수집당 스크롤 횟수 (많을수록 오래된 글까지 수집)
+```
+
+### 자동 좋아요 (선택)
+
+AI 처리 후 관련성 있고 중요도가 높은 게시물에 자동으로 좋아요를 누릅니다. 알고리즘 피드가 기술 콘텐츠 위주로 학습되는 효과가 있습니다.
+
+```yaml
+like:
+  enabled: true
+  dry_run: false          # true면 클릭 없이 로그만
+  min_importance: 0.7     # 이 중요도 이상만 좋아요
+  max_per_run: 10         # 1회(플랫폼당) 최대 좋아요 수
+  platforms: ["twitter", "threads", "linkedin"]
 ```
 
 ---
 
 ## 카테고리
 
-수집된 게시물은 AI가 자동으로 7개 카테고리로 분류합니다.
+수집된 게시물은 AI가 자동으로 8개 카테고리로 분류합니다.
 
 | 카테고리 | 내용 |
 |----------|------|
 | **AI** | 인공지능, LLM, GPT, Claude, 딥러닝 |
 | **반도체** | TSMC, HBM, GPU, NVIDIA, 파운드리 |
-| **클라우드** | AWS, Azure, GCP, 데이터센터 |
+| **클라우드·인프라** | AWS, Azure, GCP, 데이터센터, 전력 |
 | **빅테크** | Google, Apple, Meta, Amazon, Microsoft |
 | **스타트업** | 투자, 펀딩, M&A, 벤처 |
 | **규제/정책** | AI법, EU, 독점, 정부 정책 |
 | **코딩** | GitHub, 오픈소스, React, DevOps |
+| **메이커·쇼케이스** | 사이드프로젝트, 바이브코딩, Product Hunt 런칭 |
 
 카테고리를 추가/수정하려면 `config/settings.yaml`의 `categories` 항목을 편집하세요.
 
@@ -202,17 +244,16 @@ collection:
 자동 스케줄러 외에 직접 실행할 수도 있습니다.
 
 ```bash
-# 즉시 수집 (모든 플랫폼)
+# 즉시 수집 (모든 소스)
 python main.py collect-now
 
-# 특정 플랫폼만 수집
+# 특정 소스만 수집 (twitter / threads / linkedin / dcinside / 36kr / producthunt)
 python main.py collect-now twitter
 
-# AI 처리 수동 트리거
-curl -X POST http://localhost:8000/api/process/trigger
-
-# 브리핑 즉시 생성
-curl -X POST http://localhost:8000/api/briefing/generate
+# 실행 중인 서버에 수동 트리거
+curl -X POST http://localhost:8000/api/collect/trigger/twitter   # 특정 소스 수집
+curl -X POST http://localhost:8000/api/process/trigger           # AI 처리
+curl -X POST http://localhost:8000/api/briefing/generate         # 브리핑 생성+발송
 
 # 스케줄러 없이 웹 서버만 실행
 python main.py serve --no-scheduler
@@ -223,22 +264,24 @@ python main.py serve --no-scheduler
 ## 아키텍처
 
 ```
-┌─────────────────────────────────────────┐
-│   SNS 수집기 (Python, 로컬)             │
-│  X · Threads · LinkedIn · DCInside      │
-└──────────────┬──────────────────────────┘
-               │ 수집 (10분마다)
+┌───────────────────────────────────────────────┐
+│   수집기 (Python, 로컬)                        │
+│  X · Threads · LinkedIn (Chrome CDP)          │
+│  DCInside · 36kr · Product Hunt (HTTP)        │
+└──────────────┬────────────────────────────────┘
+               │ 수집 (소스별 20~120분)
                ▼
-        ┌──────────────┐
-        │   AI 처리    │
-        │ (GPT-4o-mini)│
-        └──┬───────┬───┘
-           │       │
-           ▼       ▼
-    ┌─────────┐  ┌──────────────┐
-    │ SQLite  │  │  Firestore   │
-    │ (Posts) │  │ (Briefings)  │
-    └────┬────┘  └──────┬───────┘
+   ┌────────────────────────────┐
+   │   AI 처리 (하이브리드)      │
+   │ 필터·분류·검증: OpenAI     │
+   │ 작문·큐레이션: Claude Code │
+   └──────┬──────────────┬──────┘
+          │              │
+          ▼              ▼
+    ┌─────────┐   ┌──────────────┐
+    │ SQLite  │   │  Firestore   │
+    │ (Posts) │   │ (Briefings)  │
+    └────┬────┘   └──────┬───────┘
          │               │
          ▼               ▼
   ┌─────────────────────────────┐
@@ -253,6 +296,8 @@ python main.py serve --no-scheduler
         └─────────────────┘
 ```
 
+클린 아키텍처 4계층(domain → application → infrastructure → presentation)으로 구성되며, 모든 의존성 조립은 `src/infrastructure/config/container.py` 한 곳에서 이뤄집니다.
+
 ---
 
 ## 기술 스택
@@ -261,7 +306,8 @@ python main.py serve --no-scheduler
 |------|------|
 | 언어 | Python 3.12+ |
 | 브라우저 자동화 | Playwright (Chrome CDP) |
-| AI | OpenAI GPT-4o-mini |
+| AI (필터·분류·검증) | OpenAI gpt-5-mini |
+| AI (작문·큐레이션) | Claude Code CLI (구독 인증, OpenAI 폴백) |
 | 게시물 저장소 | SQLite (로컬, 비용 $0) |
 | 브리핑 저장소 | Firebase Firestore (선택) |
 | 웹 서버 | FastAPI + uvicorn |
@@ -276,22 +322,26 @@ python main.py serve --no-scheduler
 ```
 sns_algorithm_data_collection/
 ├── src/
-│   ├── domain/              # 도메인 엔티티 (Post, Briefing, Category 등)
+│   ├── domain/              # 순수 비즈니스 (엔티티, Protocol 인터페이스)
 │   ├── application/
-│   │   └── use_cases/       # 비즈니스 로직
+│   │   └── use_cases/       # 오케스트레이션
 │   │       ├── collect_posts.py
 │   │       ├── process_posts.py
 │   │       ├── generate_briefing.py
+│   │       ├── like_posts.py
 │   │       └── scheduler.py
-│   └── infrastructure/
-│       ├── collectors/      # SNS 수집기
-│       ├── database/
-│       │   └── repositories/
-│       ├── ai/              # OpenAI 프롬프트 및 처리
-│       └── config/
+│   ├── infrastructure/
+│   │   ├── collectors/      # SNS(CDP)·HTTP 수집기
+│   │   ├── ai/              # OpenAI·Claude 프로세서, 프롬프트, 클러스터링·스코어링
+│   │   ├── database/        # SQLite·Firestore 레포지토리
+│   │   ├── delivery/        # 이메일 렌더러·브리핑 빌더
+│   │   └── config/          # 설정 로더 + Container (의존성 조립)
+│   └── presentation/
+│       └── web/             # FastAPI REST API + HTMX 대시보드
+├── tests/                   # pytest (test_collectors / test_processing / test_briefing)
 ├── docs/                    # GitHub Pages 웹 대시보드
 ├── data/
-│   └── posts.db             # SQLite (자동 생성)
+│   └── posts.db             # SQLite (자동 생성, git 제외)
 ├── config/
 │   └── settings.yaml        # 수집/AI/브리핑 설정
 ├── main.py
@@ -361,9 +411,10 @@ netstat -ano | findstr :9222
 
 | 저장소 | 데이터 | 정리 정책 |
 |--------|--------|-----------|
-| SQLite (로컬) | 게시물, 수집 이력 | 1개월 이상 자동 삭제 |
+| SQLite (로컬) | 게시물, 수집 이력 | 30일 이상 자동 삭제. 브리핑 완료된 저중요도 게시물은 즉시 삭제 |
 | Firebase Firestore | 브리핑 | 영구 보관 |
+| 인메모리 | 카테고리 | YAML에서 시드, 영속 안 함 |
 
 ---
 
-**마지막 업데이트**: 2026-07-02
+**마지막 업데이트**: 2026-07-10
