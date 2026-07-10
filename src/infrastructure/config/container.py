@@ -144,6 +144,12 @@ class Container:
         )
 
     def process_posts_use_case(self) -> ProcessPostsUseCase:
+        # 독자 피드백(과대/과소)을 중요도 채점 few-shot 보정으로 주입.
+        # 팩토리가 실행마다 호출되므로 최신 피드백이 매 처리 사이클에 반영된다.
+        try:
+            self.ai_processor.set_feedback_examples(self.feedback_repo.get_examples(20))
+        except Exception:
+            pass
         return ProcessPostsUseCase(
             post_repo=self.post_repo,
             ai_processor=self.ai_processor,

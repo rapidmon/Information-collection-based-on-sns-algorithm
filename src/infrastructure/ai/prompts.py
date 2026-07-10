@@ -69,6 +69,39 @@ FILTER_AND_SUMMARIZE = """아래 게시물들의 기술 뉴스 관련성을 판�
 [{{"post_id":"...","is_relevant":true,"summary":"한국어 요약","language":"ko"}},{{"post_id":"...","is_relevant":false,"summary":null,"language":"en"}}]"""
 
 
+def build_feedback_calibration(examples: list[dict]) -> str:
+    """독자 피드백(과대/과소)을 CATEGORIZE의 채점 보정 블록으로 변환.
+
+    예시가 없으면 빈 문자열 → 프롬프트에 아무것도 추가되지 않는다.
+    평가 대상은 헤드라인 문구가 아니라 '그 유형의 사건에 매겨진 중요도'다.
+    """
+    if not examples:
+        return ""
+    over = [e for e in examples if e.get("label") == "over"]
+    under = [e for e in examples if e.get("label") == "under"]
+    if not over and not under:
+        return ""
+
+    def _line(e: dict) -> str:
+        return f"- [{e.get('category') or '?'}] {(e.get('headline') or '').strip()[:80]}"
+
+    lines = [
+        "## 독자 피드백 보정 (과거 브리핑 평가)",
+        "과거 브리핑 항목의 중요도 점수에 대해 독자가 남긴 평가다.",
+        "개별 문구를 외우지 말고 '어떤 유형의 사건이 과대/과소평가되는가'를 일반화해서",
+        "(예: 예고성 발표, 단순 홍보, 실무 보안 이슈 등) 유사한 성격의 게시물 점수를 보정하라.",
+    ]
+    if over:
+        lines.append("")
+        lines.append("과대평가됐던 항목 — 이런 유형은 점수를 낮춰라:")
+        lines.extend(_line(e) for e in over)
+    if under:
+        lines.append("")
+        lines.append("과소평가됐던 항목 — 이런 유형은 점수를 높여라:")
+        lines.extend(_line(e) for e in under)
+    return "\n".join(lines) + "\n\n"
+
+
 CATEGORIZE = """아래 게시물들을 분류하고 중요도를 매겨라.
 
 ## 카테고리 (복수 선택 가능)
@@ -144,7 +177,7 @@ Showcase 카테고리는 뉴스가치 대신 아래 4축으로 채점(가장 강
 | "Next.js vs Remix 개인적 비교 (벤치마크 없음)" | 0.3 | 0.4 | 0.4 |
 | "AI 시대에 개발자의 미래 (의견글)" | 0.25 | 0.2 | 0.25 |
 
-## 키워드 추출 규칙
+{feedback_block}## 키워드 추출 규칙
 - 3-5개, 고유명사 위주 (기업명, 제품명, 기술명, 수치)
 - 카테고리명(AI, Semiconductor 등)은 키워드에 포함 금지
 

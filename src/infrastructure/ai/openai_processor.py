@@ -36,6 +36,7 @@ from src.infrastructure.ai.prompts import (
     SYSTEM_PROMPT,
     TIER,
     VERIFY_CLAIMS,
+    build_feedback_calibration,
 )
 from src.infrastructure.ai.topic_merger import TopicMerger
 from src.infrastructure.config.settings import ProcessingConfig
@@ -261,13 +262,24 @@ class BaseLLMProcessor:
         )
         return results
 
+    def set_feedback_examples(self, examples: list[dict]) -> None:
+        """독자 피드백(과대/과소) 예시 주입 — categorize 중요도 채점의 few-shot 보정."""
+        self._feedback_examples = examples or []
+
     async def categorize(self, posts: list[Post]) -> list[CategoryResult]:
         """카테고리 분류 + 중요도 (gpt-4o-mini 사용, 배치)."""
         results: list[CategoryResult] = []
+        # ClaudeCodeProcessor는 super().__init__을 안 타므로 getattr로 방어
+        feedback_block = build_feedback_calibration(getattr(self, "_feedback_examples", []))
+        if feedback_block:
+            logger.info(
+                f"분류 프롬프트에 독자 피드백 보정 주입: "
+                f"{len(getattr(self, '_feedback_examples', []))}건"
+            )
 
         for batch in _chunked(posts, self._config.batch_size_categorize):
             posts_json = _posts_to_json_lite(batch)
-            prompt = CATEGORIZE.format(posts_json=posts_json)
+            prompt = CATEGORIZE.format(posts_json=posts_json, feedback_block=feedback_block)
 
             try:
                 # 추론 토큰과 배치 JSON이 한도를 나눠 쓰므로 잘림 방지용 상향

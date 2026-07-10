@@ -27,6 +27,10 @@ class HybridAIProcessor:
         self._claude = claude_processor
         self._config = openai_processor._config
 
+    def set_feedback_examples(self, examples: list[dict]) -> None:
+        # 분류(중요도 채점)는 OpenAI가 수행하므로 그쪽에만 주입
+        self._openai.set_feedback_examples(examples)
+
     async def filter_and_summarize(self, posts: list[Post]):
         return await self._openai.filter_and_summarize(posts)
 
