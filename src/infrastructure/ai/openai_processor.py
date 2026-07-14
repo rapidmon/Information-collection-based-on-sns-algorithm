@@ -12,6 +12,7 @@ import logging
 import re
 from typing import Any
 
+from bs4 import BeautifulSoup
 from openai import OpenAI
 
 from src.domain.entities import Post
@@ -39,10 +40,17 @@ from src.infrastructure.ai.prompts import (
     build_feedback_calibration,
 )
 from src.infrastructure.ai.topic_merger import TopicMerger
+from src.infrastructure.collectors.http import fetch_text
 from src.infrastructure.config.settings import ProcessingConfig
 from src.infrastructure.delivery.categories import VALID_BRIEFING_CATEGORIES
 
 logger = logging.getLogger(__name__)
+
+# 웹검증 시 본문을 fetch할 상위 검색 결과 수 / 발췌 최대 길이.
+# 스니펫만으론 루머·전망 기사("what we know" 류)를 확인 출처로 오독하기 쉬워
+# 상위 결과의 실제 본문(대개 도입부에 "아직 미출시" 같은 결정적 문장)을 판정에 공급한다.
+VERIFY_FETCH_TOP_N = 2
+VERIFY_PAGE_MAX_CHARS = 3000
 
 
 class LLMBackendError(RuntimeError):
@@ -791,10 +799,20 @@ class OpenAIProcessor(BaseLLMProcessor):
             if search_results is None:
                 search_failed += 1
                 continue
+            # 상위 결과 본문 발췌 — 스니펫에 잘리는 결정적 문장(예: "아직 미출시")을 판정에 공급.
+            # fetch 실패(paywall·봇 차단)는 발췌 없이 스니펫만으로 판정 (기존과 동일한 관대 폴백)
+            excerpts = []
+            for r in search_results[:VERIFY_FETCH_TOP_N]:
+                if not r.get("href"):
+                    continue
+                excerpt = await self._fetch_page_excerpt(r["href"])
+                if excerpt:
+                    excerpts.append({"href": r["href"], "excerpt": excerpt})
             verification_data.append({
                 "post_id": claim_item["post_id"],
                 "claim": claim_item["claim"],
                 "search_results": search_results,
+                "page_excerpts": excerpts,
             })
 
         if search_failed:
@@ -849,6 +867,21 @@ class OpenAIProcessor(BaseLLMProcessor):
             f"(검증됨: {verified}, 미검증: {unverified}, 허위/스캠: {contradicted})"
         )
         return results
+
+    async def _fetch_page_excerpt(self, url: str) -> str | None:
+        """검색 결과 페이지의 본문 텍스트 발췌를 반환. 실패 시 None."""
+        html = await fetch_text(url, "verify", timeout=15.0)
+        if not html:
+            return None
+        try:
+            soup = BeautifulSoup(html, "lxml")
+            for tag in soup(["script", "style", "noscript", "header", "footer", "nav"]):
+                tag.decompose()
+            text = " ".join(soup.get_text(" ").split())
+            return text[:VERIFY_PAGE_MAX_CHARS] or None
+        except Exception as e:
+            logger.warning(f"본문 파싱 실패 '{url[:60]}': {e}")
+            return None
 
     def _web_search(self, query: str, max_results: int = 5) -> list[dict] | None:
         """DuckDuckGo로 웹 검색.
