@@ -75,6 +75,9 @@ class CollectorConfig:
         self.request_delay_max: float = data.get("request_delay_max", 3.0)
         # 수집 단계 게시일 컷오프 (collection.max_age_days에서 주입)
         self.max_age_days: int = data.get("max_age_days", 2)
+        # news 전용 — RSS/Atom 피드 선언 목록 [{name, tier, url}] + 피드당 항목 상한
+        self.feeds: list[dict[str, Any]] = data.get("feeds", [])
+        self.max_items_per_feed: int = data.get("max_items_per_feed", 30)
 
 
 class CategoryConfig:

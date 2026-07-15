@@ -33,6 +33,9 @@ VERIFY_MIN_SCORE = 0.85
 # 브리핑 완료 후 이 AI 중요도 이하 게시물은 즉시 삭제 (재사용처 없음)
 PURGE_MAX_SCORE = 0.6
 
+# 스캠/허위 웹검증 제외 소스 — producthunt(만든 결과물), news(공신력 매체 보도)
+NON_VERIFIED_SOURCES = {"producthunt", "news"}
+
 
 class GenerateBriefingUseCase:
     def __init__(
@@ -125,7 +128,7 @@ class GenerateBriefingUseCase:
         """정규화 점수 0.85+ 클러스터의 구성 게시물만 신뢰도 검증.
 
         과반이 '반박(contradicted)'인 클러스터는 스캠/허위로 보고 제거한다.
-        Product Hunt 등 '만든 결과물' 소스는 검증 대상이 아니므로 제외.
+        Product Hunt('만든 결과물')·news(공신력 매체 보도) 소스는 검증 대상이 아니므로 제외.
         """
         top = [t for t in topics if (t.importance_score or 0) >= VERIFY_MIN_SCORE]
         if not top:
@@ -135,7 +138,7 @@ class GenerateBriefingUseCase:
         for t in top:
             for pid in (t.post_ids or []):
                 p = post_map.get(str(pid))  # post_ids가 문자열일 수 있어 str 키 조회
-                if p and p.id not in seen and p.source != "producthunt":
+                if p and p.id not in seen and p.source not in NON_VERIFIED_SOURCES:
                     seen.add(p.id)
                     vposts.append(p)
         if not vposts:

@@ -21,6 +21,7 @@ from src.infrastructure.ai.openai_processor import OpenAIProcessor
 from src.infrastructure.collectors.dcinside_collector import DCInsideCollector
 from src.infrastructure.collectors.kr36_collector import Kr36Collector
 from src.infrastructure.collectors.linkedin_collector import LinkedInCollector
+from src.infrastructure.collectors.news_collector import NewsCollector
 from src.infrastructure.collectors.post_liker import CdpPostLiker
 from src.infrastructure.collectors.producthunt_collector import ProductHuntCollector
 from src.infrastructure.collectors.threads_collector import ThreadsCollector
@@ -104,6 +105,9 @@ class Container:
 
         if "producthunt" in collector_configs and collector_configs["producthunt"].enabled:
             self.collectors["producthunt"] = ProductHuntCollector(collector_configs["producthunt"])
+
+        if "news" in collector_configs and collector_configs["news"].enabled:
+            self.collectors["news"] = NewsCollector(collector_configs["news"])
 
         # SNS 수집기 — 모두 CDP 기반 (사용자의 Chrome에 연결)
         if "twitter" in collector_configs and collector_configs["twitter"].enabled:

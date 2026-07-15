@@ -37,6 +37,26 @@ collection:
   producthunt:
     enabled: true
     interval_minutes: 120  # AI 제품 런칭·쇼케이스 (Atom RSS, 로그인 불필요)
+  news:
+    enabled: true
+    interval_minutes: 60   # 외신·AI 기업 1차 소스 RSS (HTTP, 로그인 불필요)
+    max_items_per_feed: 30
+    # tier — official: 정식 tech 매체(추후 보도폭 가산 대상) / paywalled: 페이월 헤드라인·재인용만
+    #        primary: AI 기업 1차 소스. 페이월·RSS 없는 곳은 Google News RSS 프록시로 헤드라인만 수집.
+    feeds:
+      - { name: "TechCrunch", tier: official, url: "https://techcrunch.com/feed/" }
+      - { name: "The Verge", tier: official, url: "https://www.theverge.com/rss/index.xml" }
+      - { name: "Platformer", tier: official, url: "https://www.platformer.news/rss/" }
+      - { name: "Semafor", tier: official, url: "https://news.google.com/rss/search?q=site:semafor.com/article%20when:2d%20(AI%20OR%20tech%20OR%20technology)&hl=en-US&gl=US&ceid=US:en" }
+      - { name: "Hugging Face Blog", tier: official, url: "https://huggingface.co/blog/feed.xml" }
+      - { name: "The Information", tier: paywalled, url: "https://news.google.com/rss/search?q=site:theinformation.com%20when:2d&hl=en-US&gl=US&ceid=US:en" }
+      - { name: "Bloomberg", tier: paywalled, url: "https://news.google.com/rss/search?q=site:bloomberg.com%20when:2d%20(AI%20OR%20tech)&hl=en-US&gl=US&ceid=US:en" }
+      - { name: "Wired", tier: paywalled, url: "https://news.google.com/rss/search?q=site:wired.com%20when:2d&hl=en-US&gl=US&ceid=US:en" }
+      - { name: "OpenAI", tier: primary, url: "https://openai.com/news/rss.xml" }
+      - { name: "Anthropic", tier: primary, url: "https://news.google.com/rss/search?q=site:anthropic.com%20when:7d&hl=en-US&gl=US&ceid=US:en" }
+      - { name: "Google DeepMind", tier: primary, url: "https://deepmind.google/blog/rss.xml" }
+      - { name: "Meta AI", tier: primary, url: "https://news.google.com/rss/search?q=site:ai.meta.com%20when:7d&hl=en-US&gl=US&ceid=US:en" }
+      - { name: "xAI", tier: primary, url: "https://news.google.com/rss/search?q=site:x.ai%20when:7d&hl=en-US&gl=US&ceid=US:en" }
 
 categories:
   - name: "AI"
