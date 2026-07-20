@@ -22,7 +22,11 @@ from src.domain.repositories.briefing_repository import BriefingRepository
 from src.domain.repositories.post_repository import PostRepository
 from src.domain.services.ai_processor import AIProcessor
 from src.domain.services.briefing_generator import BriefingGenerator
-from src.infrastructure.ai.importance_scorer import score_posts_by_category, score_topics
+from src.infrastructure.ai.importance_scorer import (
+    renormalize_topics_by_category,
+    score_posts_by_category,
+    score_topics,
+)
 from src.infrastructure.config.settings import ScoringConfig
 
 logger = logging.getLogger(__name__)
@@ -162,12 +166,18 @@ class GenerateBriefingUseCase:
             return topics
 
         kept = []
+        removed_categories: set[str] = set()
         for i, t in enumerate(topics):
             if i in dup_indexes:
                 logger.info(f"기브리핑 사건 제외: {t.headline[:60]}")
+                removed_categories.add(t.primary_category)
             else:
                 kept.append(t)
         logger.info(f"기브리핑 사건 dedup: {len(topics)}개 중 {len(dup_indexes)}개 제외")
+
+        # 제거가 발생한 카테고리는 생존 토픽 기준으로 재정규화 — 사라진 1위(기준점)
+        # 점수에 눌려 오늘의 신선한 뉴스까지 하한(0.85) 탈락하는 것을 방지
+        renormalize_topics_by_category(kept, only_categories=removed_categories)
         return kept
 
     async def _verify_top(self, topics: list, post_map: dict) -> list:

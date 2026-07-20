@@ -8,10 +8,10 @@ from src.application.use_cases.generate_briefing import GenerateBriefingUseCase
 from src.domain.services.ai_processor import MergedTopic
 
 
-def _topic(headline: str) -> MergedTopic:
+def _topic(headline: str, category: str = "Semiconductor", score: float = 0.9) -> MergedTopic:
     return MergedTopic(
         post_ids=[1], headline=headline, body_bullets=["요약"],
-        primary_category="Semiconductor", importance_score=0.9, sources=["threads"],
+        primary_category=category, importance_score=score, sources=["threads"],
     )
 
 
@@ -85,3 +85,35 @@ async def test_ai_failure_keeps_all_topics():
     uc = _uc(FakeBriefingRepo(["과거 사건"]), BrokenAI())
     topics = [_topic("사건 A")]
     assert await uc._drop_already_covered(topics) == topics
+
+
+async def test_renormalize_only_affected_category():
+    """카테고리 1위가 dedup으로 제거되면 생존분 기준으로 재정규화 — 다른 카테고리는 불변."""
+    repo = FakeBriefingRepo(["SK하이닉스, 미국 Nasdaq 상장"])
+    ai = FakeAI(dup_indexes=[0])  # 반도체 1위(0.95)가 기브리핑 사건
+    uc = _uc(repo, ai)
+
+    topics = [
+        _topic("SK하이닉스 상장 재보도", "Semiconductor", 0.95),
+        _topic("삼성 파운드리 신규 수주", "Semiconductor", 0.76),
+        _topic("HBM 가격 동향", "Semiconductor", 0.57),
+        _topic("GPT 신모델", "AI", 0.6),
+    ]
+    kept = await uc._drop_already_covered(topics)
+
+    scores = {t.headline: t.importance_score for t in kept}
+    # 반도체: 생존 1위(0.76)가 새 기준 1.0, 나머지는 비례 (0.57/0.76=0.75)
+    assert scores["삼성 파운드리 신규 수주"] == 1.0
+    assert scores["HBM 가격 동향"] == round(0.57 / 0.76, 4)
+    # 제거가 없던 AI 카테고리는 그대로
+    assert scores["GPT 신모델"] == 0.6
+
+
+async def test_no_removal_no_renormalize():
+    repo = FakeBriefingRepo(["과거 사건"])
+    ai = FakeAI(dup_indexes=[])
+    uc = _uc(repo, ai)
+
+    topics = [_topic("사건 A", "Semiconductor", 0.7)]
+    kept = await uc._drop_already_covered(topics)
+    assert kept[0].importance_score == 0.7  # 제거 없음 → 점수 불변

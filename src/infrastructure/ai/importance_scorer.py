@@ -90,6 +90,33 @@ def score_posts_by_category(baseline_posts: list, cfg: ScoringConfig) -> dict[st
     return scores_by_post
 
 
+def renormalize_topics_by_category(
+    topics: list[MergedTopic], only_categories: set[str] | None = None
+) -> None:
+    """생존 토픽 기준으로 카테고리 최고점을 1.0으로 재정규화한다 (in-place).
+
+    기브리핑 사건 dedup이 카테고리 기준점(1위 사건)을 제거하면, 남은 토픽들이
+    사라진 1위 기준의 점수를 든 채 하한(min_importance)에 일괄 탈락할 수 있다.
+    제거가 발생한 카테고리(only_categories)만 오늘 생존분 기준의 상대평가로
+    되돌린다 — 나머지 카테고리의 선별 기준은 건드리지 않는다.
+    """
+    max_by_cat: dict[str, float] = {}
+    for t in topics:
+        if only_categories is not None and t.primary_category not in only_categories:
+            continue
+        score = t.importance_score or 0.0
+        max_by_cat[t.primary_category] = max(max_by_cat.get(t.primary_category, 0.0), score)
+
+    for t in topics:
+        mx = max_by_cat.get(t.primary_category, 0.0)
+        if mx <= 0:
+            continue
+        t.importance_score = round((t.importance_score or 0.0) / mx, 4)
+        if isinstance(t.score_features, dict):
+            t.score_features["final"] = t.importance_score
+            t.score_features["renormalized_after_dedup"] = True
+
+
 def score_topics(
     topics: list[MergedTopic],
     post_map: dict,
