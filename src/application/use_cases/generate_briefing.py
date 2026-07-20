@@ -36,6 +36,9 @@ PURGE_MAX_SCORE = 0.6
 # 스캠/허위 웹검증 제외 소스 — producthunt(만든 결과물), news(공신력 매체 보도)
 NON_VERIFIED_SOURCES = {"producthunt", "news"}
 
+# 기브리핑 사건 dedup 시 비교할 최근 브리핑 수
+RECENT_BRIEFINGS_FOR_DEDUP = 3
+
 
 class GenerateBriefingUseCase:
     def __init__(
@@ -87,6 +90,10 @@ class GenerateBriefingUseCase:
             post_category_scores=post_category_scores,
         )
 
+        # ③.5 최근 브리핑에서 이미 다룬 사건 제거 — 검증·작문 토큰을 쓰기 전에 컷.
+        #     (게시물은 매일 새로 유입돼 사건이 여러 날 반복 발행되는 것을 막는다)
+        merged_topics = await self._drop_already_covered(merged_topics)
+
         # ④ 상위(0.85+) 후보만 검증 → 과반 반박 클러스터 제거
         merged_topics = await self._verify_top(merged_topics, post_map)
 
@@ -123,6 +130,45 @@ class GenerateBriefingUseCase:
 
         logger.info(f"브리핑 생성 완료: '{briefing.title}' ({briefing.total_items}건 항목)")
         return briefing
+
+    async def _drop_already_covered(self, topics: list) -> list:
+        """최근 브리핑(RECENT_BRIEFINGS_FOR_DEDUP회)에서 이미 다룬 사건을 제거.
+
+        새로운 전개(후속 수치·결과)가 있는 토픽은 LLM 판정이 유지한다.
+        조회·판정 실패 시 dedup을 건너뛴다 (중복 발행이 잘못 삭제보다 낫다).
+        """
+        if not topics:
+            return topics
+        try:
+            recent = await self._briefing_repo.get_all(limit=RECENT_BRIEFINGS_FOR_DEDUP)
+        except Exception as e:
+            logger.warning(f"최근 브리핑 조회 실패 — 기브리핑 사건 dedup 스킵: {e}")
+            return topics
+
+        recent_items = [
+            f"[{it.category_name}] {it.headline}"
+            for b in recent
+            for it in (b.items or [])
+        ]
+        if not recent_items:
+            return topics
+
+        try:
+            dup_indexes = set(await self._ai.find_covered_topics(topics, recent_items))
+        except Exception as e:
+            logger.warning(f"기브리핑 사건 판정 실패 — dedup 스킵: {e}")
+            return topics
+        if not dup_indexes:
+            return topics
+
+        kept = []
+        for i, t in enumerate(topics):
+            if i in dup_indexes:
+                logger.info(f"기브리핑 사건 제외: {t.headline[:60]}")
+            else:
+                kept.append(t)
+        logger.info(f"기브리핑 사건 dedup: {len(topics)}개 중 {len(dup_indexes)}개 제외")
+        return kept
 
     async def _verify_top(self, topics: list, post_map: dict) -> list:
         """정규화 점수 0.85+ 클러스터의 구성 게시물만 신뢰도 검증.

@@ -114,6 +114,15 @@ class AIProcessor(Protocol):
         """중복 제거 및 유사 토픽 통합 브리핑 항목 생성."""
         ...
 
+    async def find_covered_topics(
+        self, topics: list["MergedTopic"], recent_items: list[str]
+    ) -> list[int]:
+        """최근 브리핑에서 이미 다룬 사건과 같은 사건인 토픽의 인덱스 목록.
+
+        새로운 전개(후속 수치·결과·다음 단계)가 있는 토픽은 중복으로 치지 않는다.
+        """
+        ...
+
     async def compose_topics(
         self, topics: list["MergedTopic"], posts: list[Post]
     ) -> list[MergedTopic]:

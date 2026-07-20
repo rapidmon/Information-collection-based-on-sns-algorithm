@@ -173,17 +173,46 @@ class ProcessPostsUseCase:
         )
         return totals
 
+    def _split_previously_rejected(self, posts: list) -> tuple[list, list]:
+        """동일 content_hash가 과거에 비관련 판정된 게시물을 분리해 즉시 기각 처리.
+
+        같은 텍스트를 다계정으로 뿌리는 복제 스팸은 LLM 필터의 비결정성
+        (같은 글도 배치마다 판정이 갈림)을 물량으로 뚫는다 — 한 번 기각된
+        해시는 LLM 없이 결정적으로 차단해 확률 게임 자체를 없앤다.
+        """
+        hashes = [p.content_hash for p in posts if p.content_hash]
+        try:
+            rejected = self._post_repo.find_rejected_hashes(hashes) if hashes else set()
+        except Exception as e:
+            logger.warning(f"기각 이력 조회 실패 — 자동 차단 스킵: {e}")
+            return posts, []
+        keep, pre = [], []
+        for p in posts:
+            if p.content_hash and p.content_hash in rejected:
+                p.is_relevant = False
+                p.summary = "[filtered]"
+                pre.append(p)
+            else:
+                keep.append(p)
+        if pre:
+            logger.info(f"기각 이력 자동 차단: {len(pre)}건 (동일 해시 비관련 전례)")
+        return keep, pre
+
     async def _process_chunk(self, posts: list) -> dict[str, int]:
         """단일 청크에 대해 필터→검증→분류→업데이트 파이프라인을 실행."""
         logger.info(f"AI 처리 시작: {len(posts)}건")
 
-        # 1. 관련성 필터 + 요약
-        filter_results = await self._ai.filter_and_summarize(posts)
+        # 0. 기각 이력 자동 차단 — 비관련 전례가 있는 동일 해시는 LLM을 태우지 않는다
+        posts, pre_rejected = self._split_previously_rejected(posts)
+        total_count = len(posts) + len(pre_rejected)
+
+        # 1. 관련성 필터 + 요약 (자동 차단분 제외)
+        filter_results = await self._ai.filter_and_summarize(posts) if posts else []
 
         # LLM이 post_id를 숫자/문자열 어느 쪽으로 반환해도 맞도록 str 키로 통일
         post_map = {str(p.id): p for p in posts}
         relevant_posts = []
-        irrelevant_posts = []
+        irrelevant_posts = list(pre_rejected)
         processed_ids: set[str] = set()
 
         for result in filter_results:
@@ -266,7 +295,7 @@ class ProcessPostsUseCase:
             self._post_repo.update_many(all_processed)
 
         return {
-            "total": len(posts),
+            "total": total_count,
             "relevant": len(relevant_posts),
             "filtered_out": len(irrelevant_posts),
         }

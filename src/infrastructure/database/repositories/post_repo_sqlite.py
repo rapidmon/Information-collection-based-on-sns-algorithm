@@ -258,6 +258,23 @@ class PostRepositorySQLite:
         """, (limit,))
         return [_post_from_row(row) for row in cursor.fetchall()]
 
+    def find_rejected_hashes(self, hashes: list[str]) -> set[str]:
+        """주어진 content_hash 중 비관련(is_relevant=0) 판정 전례가 있는 해시 집합.
+
+        동일 텍스트를 다계정으로 뿌리는 복제 스팸이 LLM 필터의 비결정성을
+        물량으로 뚫는 것을 막는다 — process_posts가 필터 호출 전에 조회.
+        """
+        if not hashes:
+            return set()
+        conn = _get_db()
+        cursor = conn.cursor()
+        placeholders = ",".join("?" * len(hashes))
+        cursor.execute(f"""
+            SELECT DISTINCT content_hash FROM posts
+            WHERE is_relevant = 0 AND content_hash IN ({placeholders})
+        """, hashes)
+        return {row[0] for row in cursor.fetchall()}
+
     def find_by_source(self, source: str, limit: int = 100) -> list[Post]:
         """소스별 Post 조회."""
         conn = _get_db()

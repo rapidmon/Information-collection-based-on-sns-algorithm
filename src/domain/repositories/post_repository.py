@@ -31,6 +31,13 @@ class PostRepository(Protocol):
         """AI 처리 안 된 게시물 조회 (summary가 None)."""
         ...
 
+    def find_rejected_hashes(self, hashes: list[str]) -> set[str]:
+        """주어진 content_hash 중 비관련(is_relevant=0) 판정 전례가 있는 해시 집합.
+
+        동일 텍스트를 다계정으로 재게시하는 복제 스팸 차단용 기각 이력 조회.
+        """
+        ...
+
     def find_by_id(self, post_id: str) -> Post | None:
         """id(external_id)로 조회."""
         ...

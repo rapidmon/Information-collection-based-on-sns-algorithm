@@ -40,6 +40,10 @@ class HybridAIProcessor:
     async def verify_claims(self, posts: list[Post]):
         return await self._openai.verify_claims(posts)
 
+    async def find_covered_topics(self, topics: list[MergedTopic], recent_items: list[str]):
+        # 브리핑 생성 시 1회의 헤드라인 비교 배치 — 고빈도 배치와 같은 OpenAI 경로
+        return await self._openai.find_covered_topics(topics, recent_items)
+
     async def judge_tiers(self, topics: list[MergedTopic], calibration_examples: list | None = None):
         # Tier judgement is one compact call after merging; Claude is useful here.
         return await self._claude.judge_tiers(topics, calibration_examples=calibration_examples)

@@ -34,6 +34,7 @@ from src.infrastructure.ai.prompts import (
     CURATION,
     EXTRACT_CLAIMS,
     FILTER_AND_SUMMARIZE,
+    RECENT_COVERAGE_DEDUP,
     SYSTEM_PROMPT,
     TIER,
     VERIFY_CLAIMS,
@@ -746,6 +747,41 @@ class OpenAIProcessor(BaseLLMProcessor):
         raise RuntimeError(
             f"LLM 빈 응답 (model={model}, finish_reason={choice.finish_reason})"
         )
+
+    async def find_covered_topics(
+        self, topics: list[MergedTopic], recent_items: list[str]
+    ) -> list[int]:
+        """최근 브리핑에서 이미 다룬 사건과 같은 사건인 토픽의 인덱스 목록."""
+        if not topics or not recent_items:
+            return []
+
+        candidates = json.dumps(
+            [
+                {
+                    "index": i,
+                    "headline": t.headline,
+                    "summary": (t.body_bullets or [""])[0],
+                }
+                for i, t in enumerate(topics)
+            ],
+            ensure_ascii=False,
+            indent=2,
+        )
+        prompt = RECENT_COVERAGE_DEDUP.format(
+            recent_items="\n".join(f"- {s}" for s in recent_items),
+            candidates=candidates,
+        )
+        response_text = await asyncio.to_thread(
+            self._call_api, self._config.model_filter, prompt, 8192
+        )
+        parsed = _parse_json_response(response_text)
+
+        dup_indexes = []
+        for item in parsed:
+            idx = item.get("index")
+            if item.get("duplicate") and isinstance(idx, int) and 0 <= idx < len(topics):
+                dup_indexes.append(idx)
+        return dup_indexes
 
     async def verify_claims(self, posts: list[Post]) -> list[VerificationResult]:
         """게시물의 핵심 주장을 웹 검색(DuckDuckGo)으로 교차 검증."""
