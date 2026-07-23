@@ -4,8 +4,10 @@
   ① 게시물 점수 산정 — 분류 완료 게시물을 카테고리별 상대평가
   ② 클러스터링 — 토큰 유사도 후보군을 결정적으로 병합 (LLM 미사용)
   ③ 사건 점수 집계 — 사전 계산된 게시물 점수를 사건 단위로 집계
+  ③.5 기브리핑 dedup — 카테고리별 상위 후보를 청크 단위 LLM 판정으로 기다룬 사건 제거
   ④ 검증 — 리스트업된 상위(정규화 0.85+) 후보만 웹검색 교차검증, 과반 반박 클러스터 제거
   ⑤ 선별 — 점수 하한·카테고리 상한으로 발행 항목 확정
+  ⑤.5 최종 가드 — 확정분(소규모)끼리 동일 사건 병합 + 기브리핑 사건 재확인
   ⑥ 작문 — 발행 확정 항목만 LLM으로 headline/불릿 리라이트 (탈락분 작문 토큰 절약)
   ⑦ 문서 생성
 
@@ -42,6 +44,11 @@ NON_VERIFIED_SOURCES = {"producthunt", "news"}
 
 # 기브리핑 사건 dedup 시 비교할 최근 브리핑 수
 RECENT_BRIEFINGS_FOR_DEDUP = 3
+
+# 기브리핑 사건 dedup의 카테고리별 판정 대상 상한.
+# 발행권(max_per_category=6)에 재정규화 승격 여지를 더한 값 — 발행 가능성이 없는
+# 하위 후보까지 판정에 넣으면 호출 수만 늘고 recall은 떨어진다.
+DEDUP_TOP_PER_CATEGORY = 15
 
 
 class GenerateBriefingUseCase:
@@ -101,9 +108,10 @@ class GenerateBriefingUseCase:
         # ④ 상위(0.85+) 후보만 검증 → 과반 반박 클러스터 제거
         merged_topics = await self._verify_top(merged_topics, post_map)
 
-        # ⑤ 발행 항목 확정 → ⑥ 확정분만 LLM 작문 (탈락 토픽 작문 토큰 절약)
+        # ⑤ 발행 항목 확정 → ⑤.5 확정분 최종 중복 가드 → ⑥ 확정분만 LLM 작문
         selected = self._gen.select_topics(merged_topics)
         logger.info(f"발행 항목 확정: {len(merged_topics)}개 토픽 중 {len(selected)}개")
+        selected = await self._final_dedup_guard(selected)
         selected = await self._ai.compose_topics(selected, posts)
 
         # ⑦ 브리핑 문서 생성 (generate 내부 재선별은 멱등)
@@ -138,6 +146,8 @@ class GenerateBriefingUseCase:
     async def _drop_already_covered(self, topics: list) -> list:
         """최근 브리핑(RECENT_BRIEFINGS_FOR_DEDUP회)에서 이미 다룬 사건을 제거.
 
+        판정 대상은 카테고리별 상위 DEDUP_TOP_PER_CATEGORY개(발행권 근처)로
+        좁힌다 — 발행 불가능한 하위 후보까지 넣으면 판정 recall만 떨어진다.
         새로운 전개(후속 수치·결과)가 있는 토픽은 LLM 판정이 유지한다.
         조회·판정 실패 시 dedup을 건너뛴다 (중복 발행이 잘못 삭제보다 낫다).
         """
@@ -157,11 +167,25 @@ class GenerateBriefingUseCase:
         if not recent_items:
             return topics
 
+        # 카테고리별 점수 상위만 판정 대상으로 추린다 (전역 인덱스 유지)
+        by_cat: dict[str, list[int]] = {}
+        for i, t in enumerate(topics):
+            by_cat.setdefault(t.primary_category, []).append(i)
+        judge_indexes: list[int] = []
+        for idxs in by_cat.values():
+            idxs.sort(key=lambda i: topics[i].importance_score or 0, reverse=True)
+            judge_indexes.extend(idxs[:DEDUP_TOP_PER_CATEGORY])
+        judge_indexes.sort()
+        candidates = [topics[i] for i in judge_indexes]
+
         try:
-            dup_indexes = set(await self._ai.find_covered_topics(topics, recent_items))
+            dup_local = await self._ai.find_covered_topics(candidates, recent_items)
         except Exception as e:
             logger.warning(f"기브리핑 사건 판정 실패 — dedup 스킵: {e}")
             return topics
+        dup_indexes = {
+            judge_indexes[j] for j in set(dup_local) if 0 <= j < len(judge_indexes)
+        }
         if not dup_indexes:
             return topics
 
@@ -179,6 +203,32 @@ class GenerateBriefingUseCase:
         # 점수에 눌려 오늘의 신선한 뉴스까지 하한(0.85) 탈락하는 것을 방지
         renormalize_topics_by_category(kept, only_categories=removed_categories)
         return kept
+
+    async def _final_dedup_guard(self, selected: list) -> list:
+        """발행 확정분에 대한 마지막 중복 방어선.
+
+        앞 단계(클러스터링·③.5 dedup)는 수백 개 후보를 다뤄 놓치는 사건이
+        생긴다. 확정분은 소규모라 같은 LLM 판정도 훨씬 정확하므로 여기서
+        ⑴ 카테고리가 갈려 중복 선정된 같은 사건을 병합하고
+        ⑵ 최근 브리핑에서 이미 다룬 사건을 한 번 더 걸러낸다.
+        각 단계는 실패 시 스킵한다 (중복 발행이 잘못 삭제보다 낫다).
+        """
+        if not selected:
+            return selected
+
+        if len(selected) >= 2:
+            try:
+                merged = await self._ai.consolidate_topics(selected)
+                if merged and len(merged) < len(selected):
+                    logger.info(
+                        f"발행 확정분 동일 사건 병합: {len(selected)}개 → {len(merged)}개"
+                    )
+                if merged:
+                    selected = merged
+            except Exception as e:
+                logger.warning(f"발행 확정분 병합 실패(스킵): {e}")
+
+        return await self._drop_already_covered(selected)
 
     async def _verify_top(self, topics: list, post_map: dict) -> list:
         """정규화 점수 0.85+ 클러스터의 구성 게시물만 신뢰도 검증.

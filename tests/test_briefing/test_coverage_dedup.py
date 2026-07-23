@@ -117,3 +117,93 @@ async def test_no_removal_no_renormalize():
     topics = [_topic("사건 A", "Semiconductor", 0.7)]
     kept = await uc._drop_already_covered(topics)
     assert kept[0].importance_score == 0.7  # 제거 없음 → 점수 불변
+
+
+async def test_judge_only_top_candidates_per_category():
+    """카테고리별 상위 15개만 판정 대상 — 로컬 인덱스는 전역으로 정확히 복원."""
+    repo = FakeBriefingRepo(["과거 사건"])
+    ai = FakeAI(dup_indexes=[0])  # 판정 대상(로컬) 0번
+    uc = _uc(repo, ai)
+
+    # 점수 오름차순 16개 → 최저점(전역 0)이 판정 대상에서 빠져
+    # 판정 대상의 로컬 0번은 전역 1번("A 1")이 된다
+    topics = [
+        _topic(f"A {i}", "Semiconductor", round(0.5 + i * 0.01, 2)) for i in range(16)
+    ]
+    topics.append(_topic("B 사건", "AI", 0.9))  # 전역 16
+
+    kept = await uc._drop_already_covered(topics)
+
+    judged = ai.calls[0][0]
+    assert len(judged) == 16  # Semiconductor 상위 15 + AI 1 — 최저점 "A 0"은 판정 제외
+    assert all(t.headline != "A 0" for t in judged)
+    # 로컬 0 → 전역 1 매핑: "A 1"이 제거되고, 판정 제외분("A 0")은 유지
+    kept_headlines = [t.headline for t in kept]
+    assert "A 1" not in kept_headlines
+    assert "A 0" in kept_headlines
+    assert "B 사건" in kept_headlines
+
+
+class FakeGuardAI(FakeAI):
+    """최종 가드 테스트용 — consolidate_topics까지 구현한 페이크."""
+
+    def __init__(self, dup_indexes, merged=None, fail_merge=False):
+        super().__init__(dup_indexes)
+        self.merged = merged
+        self.fail_merge = fail_merge
+        self.consolidate_calls = 0
+
+    async def consolidate_topics(self, topics):
+        self.consolidate_calls += 1
+        if self.fail_merge:
+            raise RuntimeError("merge down")
+        return self.merged if self.merged is not None else list(topics)
+
+
+async def test_final_guard_merges_cross_category_duplicates():
+    """카테고리가 갈려 중복 선정된 같은 사건은 최종 가드에서 병합된다."""
+    hf1 = _topic("OpenAI, HF 침해 인정", "BigTech", 1.0)
+    hf2 = _topic("OpenAI, HF 공격 출처 시인", "Policy", 1.0)
+    gem = _topic("Gemini 3.6 Flash 출시", "AI", 1.0)
+    merged_hf = _topic("OpenAI, HF 침해 공식 인정", "BigTech", 1.0)
+
+    ai = FakeGuardAI(dup_indexes=[], merged=[merged_hf, gem])
+    uc = _uc(FakeBriefingRepo(["과거 사건"]), ai)
+
+    result = await uc._final_dedup_guard([hf1, hf2, gem])
+    assert ai.consolidate_calls == 1
+    assert [t.headline for t in result] == [merged_hf.headline, gem.headline]
+
+
+async def test_final_guard_drops_covered_after_merge():
+    """병합 후에도 최근 브리핑 기다룬 사건은 최종 가드에서 한 번 더 걸러진다."""
+    old = _topic("Anthropic 합의 승인", "Policy", 1.0)
+    new = _topic("신규 사건", "AI", 1.0)
+    ai = FakeGuardAI(dup_indexes=[0])  # 병합 결과의 0번(old)이 기브리핑 사건
+    uc = _uc(FakeBriefingRepo(["[Policy] Anthropic 합의 승인"]), ai)
+
+    result = await uc._final_dedup_guard([old, new])
+    assert [t.headline for t in result] == ["신규 사건"]
+
+
+async def test_final_guard_merge_failure_still_rechecks_coverage():
+    """병합 실패는 스킵하고 기브리핑 재확인은 계속 수행한다."""
+    t1 = _topic("사건 A", "AI", 1.0)
+    t2 = _topic("사건 B", "AI", 0.9)
+    ai = FakeGuardAI(dup_indexes=[], fail_merge=True)
+    uc = _uc(FakeBriefingRepo(["과거 사건"]), ai)
+
+    result = await uc._final_dedup_guard([t1, t2])
+    assert ai.consolidate_calls == 1
+    assert result == [t1, t2]
+    assert len(ai.calls) == 1  # find_covered_topics는 정상 호출됨
+
+
+async def test_final_guard_single_item_skips_merge():
+    """확정분이 1개면 병합 호출 없이 기브리핑 재확인만 한다."""
+    ai = FakeGuardAI(dup_indexes=[])
+    uc = _uc(FakeBriefingRepo(["과거 사건"]), ai)
+
+    result = await uc._final_dedup_guard([_topic("사건 A")])
+    assert ai.consolidate_calls == 0
+    assert len(result) == 1

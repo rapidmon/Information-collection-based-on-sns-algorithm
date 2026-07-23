@@ -44,6 +44,10 @@ class HybridAIProcessor:
         # 브리핑 생성 시 1회의 헤드라인 비교 배치 — 고빈도 배치와 같은 OpenAI 경로
         return await self._openai.find_covered_topics(topics, recent_items)
 
+    async def consolidate_topics(self, topics: list[MergedTopic]):
+        # 발행 확정분 최종 병합 가드 — 클러스터링과 같은 OpenAI 경로
+        return await self._openai.consolidate_topics(topics)
+
     async def judge_tiers(self, topics: list[MergedTopic], calibration_examples: list | None = None):
         # Tier judgement is one compact call after merging; Claude is useful here.
         return await self._claude.judge_tiers(topics, calibration_examples=calibration_examples)

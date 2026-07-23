@@ -123,6 +123,16 @@ class AIProcessor(Protocol):
         """
         ...
 
+    async def consolidate_topics(
+        self, topics: list["MergedTopic"]
+    ) -> list["MergedTopic"]:
+        """토픽 목록 내 동일 사건 병합.
+
+        발행 확정분처럼 소규모 집합에 쓰는 최종 가드 — 카테고리가 갈려
+        클러스터링에서 합쳐지지 못한 같은 사건을 하나로 묶는다.
+        """
+        ...
+
     async def compose_topics(
         self, topics: list["MergedTopic"], posts: list[Post]
     ) -> list[MergedTopic]:

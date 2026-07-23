@@ -53,6 +53,10 @@ logger = logging.getLogger(__name__)
 VERIFY_FETCH_TOP_N = 2
 VERIFY_PAGE_MAX_CHARS = 3000
 
+# 기브리핑 사건 판정 시 한 호출에 넣을 후보 수 상한.
+# 후보가 많을수록 비교 recall이 급락하므로 반드시 분할한다.
+COVERAGE_DEDUP_CHUNK_SIZE = 50
+
 
 class LLMBackendError(RuntimeError):
     """LLM 백엔드 자체 장애 (CLI 미설치·인증 만료·한도 소진·타임아웃).
@@ -751,37 +755,54 @@ class OpenAIProcessor(BaseLLMProcessor):
     async def find_covered_topics(
         self, topics: list[MergedTopic], recent_items: list[str]
     ) -> list[int]:
-        """최근 브리핑에서 이미 다룬 사건과 같은 사건인 토픽의 인덱스 목록."""
+        """최근 브리핑에서 이미 다룬 사건과 같은 사건인 토픽의 인덱스 목록.
+
+        후보를 청크로 나눠 판정한다 — 수백 개를 단일 호출로 비교하면
+        건초더미가 커져 명백한 중복도 놓친다.
+        청크 하나가 실패하면 해당 청크만 건너뛴다(중복 발행이 잘못 삭제보다 낫다).
+        """
         if not topics or not recent_items:
             return []
 
-        candidates = json.dumps(
-            [
-                {
-                    "index": i,
-                    "headline": t.headline,
-                    "summary": (t.body_bullets or [""])[0],
-                }
-                for i, t in enumerate(topics)
-            ],
-            ensure_ascii=False,
-            indent=2,
-        )
-        prompt = RECENT_COVERAGE_DEDUP.format(
-            recent_items="\n".join(f"- {s}" for s in recent_items),
-            candidates=candidates,
-        )
-        response_text = await asyncio.to_thread(
-            self._call_api, self._config.model_filter, prompt, 8192
-        )
-        parsed = _parse_json_response(response_text)
+        recent_block = "\n".join(f"- {s}" for s in recent_items)
+        indexed = list(enumerate(topics))
+        dup_indexes: list[int] = []
+        for chunk in _chunked(indexed, COVERAGE_DEDUP_CHUNK_SIZE):
+            chunk_index_set = {i for i, _ in chunk}
+            candidates = json.dumps(
+                [
+                    {
+                        "index": i,
+                        "headline": t.headline,
+                        "summary": (t.body_bullets or [""])[0],
+                    }
+                    for i, t in chunk
+                ],
+                ensure_ascii=False,
+                indent=2,
+            )
+            prompt = RECENT_COVERAGE_DEDUP.format(
+                recent_items=recent_block,
+                candidates=candidates,
+            )
+            try:
+                response_text = await asyncio.to_thread(
+                    self._call_api, self._config.model_filter, prompt, 8192
+                )
+                parsed = _parse_json_response(response_text)
+            except Exception as e:
+                logger.warning(f"기브리핑 판정 청크 실패(해당 청크만 스킵): {e}")
+                continue
 
-        dup_indexes = []
-        for item in parsed:
-            idx = item.get("index")
-            if item.get("duplicate") and isinstance(idx, int) and 0 <= idx < len(topics):
-                dup_indexes.append(idx)
+            for item in parsed:
+                idx = item.get("index")
+                if item.get("duplicate") and isinstance(idx, int) and idx in chunk_index_set:
+                    dup_indexes.append(idx)
         return dup_indexes
+
+    async def consolidate_topics(self, topics: list[MergedTopic]) -> list[MergedTopic]:
+        """소규모 토픽 목록의 동일 사건 병합 — 발행 확정분 최종 가드용 공개 진입점."""
+        return await self._consolidate_topics(topics)
 
     async def verify_claims(self, posts: list[Post]) -> list[VerificationResult]:
         """게시물의 핵심 주장을 웹 검색(DuckDuckGo)으로 교차 검증."""
