@@ -57,6 +57,28 @@ VERIFY_PAGE_MAX_CHARS = 3000
 # 후보가 많을수록 비교 recall이 급락하므로 반드시 분할한다.
 COVERAGE_DEDUP_CHUNK_SIZE = 50
 
+# 기브리핑 판정의 matched(지목된 최근 항목) 근거 검증 시 부분 일치를 허용할 최소 길이.
+# 너무 짧은 문자열은 우연히 어느 항목에나 포함될 수 있어 근거로 치지 않는다.
+_MATCHED_MIN_PARTIAL_LEN = 15
+
+
+def _matched_in_recent(matched: str, recent_items: list[str]) -> bool:
+    """중복 판정이 지목한 근거(matched)가 실제 최근 브리핑 항목인지 검증.
+
+    "같은 분야의 비슷한 발표"까지 중복으로 쓸어담는 과잉 판정(yes-bias)을
+    막는 구조적 가드 — 실존 항목을 지목하지 못한 판정은 기각된다.
+    """
+    m = matched.strip().lstrip("-").strip()
+    if not m:
+        return False
+    for r in recent_items:
+        rs = r.strip()
+        if m == rs:
+            return True
+        if len(m) >= _MATCHED_MIN_PARTIAL_LEN and (m in rs or rs in m):
+            return True
+    return False
+
 
 class LLMBackendError(RuntimeError):
     """LLM 백엔드 자체 장애 (CLI 미설치·인증 만료·한도 소진·타임아웃).
@@ -767,6 +789,7 @@ class OpenAIProcessor(BaseLLMProcessor):
         recent_block = "\n".join(f"- {s}" for s in recent_items)
         indexed = list(enumerate(topics))
         dup_indexes: list[int] = []
+        ungrounded = 0
         for chunk in _chunked(indexed, COVERAGE_DEDUP_CHUNK_SIZE):
             chunk_index_set = {i for i, _ in chunk}
             candidates = json.dumps(
@@ -796,8 +819,23 @@ class OpenAIProcessor(BaseLLMProcessor):
 
             for item in parsed:
                 idx = item.get("index")
-                if item.get("duplicate") and isinstance(idx, int) and idx in chunk_index_set:
-                    dup_indexes.append(idx)
+                if not (
+                    item.get("duplicate")
+                    and isinstance(idx, int)
+                    and idx in chunk_index_set
+                ):
+                    continue
+                matched = item.get("matched")
+                if not isinstance(matched, str) or not _matched_in_recent(
+                    matched, recent_items
+                ):
+                    ungrounded += 1
+                    continue
+                dup_indexes.append(idx)
+        if ungrounded:
+            logger.info(
+                f"기브리핑 판정 {ungrounded}건 기각 — 실존하는 최근 항목(matched) 지목 실패"
+            )
         return dup_indexes
 
     async def consolidate_topics(self, topics: list[MergedTopic]) -> list[MergedTopic]:
