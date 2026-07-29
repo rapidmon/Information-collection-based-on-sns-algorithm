@@ -1,6 +1,6 @@
 # SNS Tech Briefing
 
-SNS(X, Threads, LinkedIn, DCInside)와 뉴스 소스(36kr, Product Hunt)에서 기술 뉴스를 자동 수집하고, AI가 필터·검증·요약/분류하여 **매일 아침 이메일 브리핑(Morning Commit)**을 보내주는 시스템입니다.
+SNS(X, Threads, LinkedIn, DCInside)와 뉴스 소스(외신·AI 기업 RSS, 36kr, Product Hunt)에서 기술 뉴스를 자동 수집하고, AI가 필터·검증·요약/분류하여 **매일 아침 이메일 브리핑(Morning Commit)**을 보내주는 시스템입니다.
 
 평소 팔로우하는 정보성 계정들의 피드를 AI가 읽고, 중요한 것만 골라 한국어로 정리해줍니다. 독자층(개발자·디자이너 등)별로 큐레이션 리드를 달리해 발송할 수도 있습니다.
 
@@ -17,9 +17,10 @@ SNS(X, Threads, LinkedIn, DCInside)와 뉴스 소스(36kr, Product Hunt)에서 �
 ## 동작 방식
 
 ```
-1. 수집 (SNS 20분 / DCInside 60분 / 36kr 30분 / Product Hunt 120분)
+1. 수집 (SNS 20분 / DCInside·뉴스 RSS 60분 / 36kr 30분 / Product Hunt 120분)
    로그인된 Chrome에서 SNS 피드를 자동 스크롤하며 게시물 수집
-   (36kr·Product Hunt는 브라우저 없이 HTTP 수집)
+   (뉴스 RSS·36kr·Product Hunt는 브라우저 없이 HTTP 수집.
+    뉴스 RSS는 TechCrunch·The Verge 등 외신 + OpenAI·Anthropic 등 1차 소스 13개 피드)
 
 2. AI 분석 (60분마다, 하이브리드 백엔드)
    - 기술 관련 여부 필터링 (일상/밈/잡담 제거) + 한국어 요약
@@ -31,6 +32,7 @@ SNS(X, Threads, LinkedIn, DCInside)와 뉴스 소스(36kr, Product Hunt)에서 �
 
 3. 브리핑 발송 (매일 오전 8시)
    - 같은 사건 게시물을 결정적 클러스터링으로 병합 (LLM 미사용, 토큰 $0)
+   - 최근 3회 브리핑에서 이미 다룬 사건은 제거 (재탕 방지, 새 전개는 유지)
    - 카테고리별 상대평가로 상위 항목만 선별, 상위 후보는 웹검증 한 번 더
    - 발행 확정 항목만 LLM이 헤드라인·불릿 작문
    - 독자층(페르소나)별 큐레이션 리드를 붙여 그룹별 이메일 발송
@@ -85,8 +87,12 @@ EMAIL_FROM=your@gmail.com
 # FIREBASE_CREDENTIAL_PATH=firebase-service-account.json
 # FIREBASE_PROJECT_ID=your-project-id
 
-# Claude Code를 다른 머신/서비스 컨텍스트에서 쓸 때만 필요 (본인 머신에서 claude 로그인돼 있으면 생략)
-# CLAUDE_CODE_OAUTH_TOKEN=...
+# Claude Code 인증 (권장: 장기 토큰)
+# 대화형 로그인(claude /login)은 세션이 만료되면 작문·큐레이션이 조용히 실패하므로,
+# 무인 운영에는 `claude setup-token`으로 발급한 장기 토큰(약 1년)을 권장.
+# 만료일(발급일+1년)을 함께 적어두면 만료 임박 알림에 사용됨
+# CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...
+# CLAUDE_CODE_OAUTH_TOKEN_EXPIRES_AT=2027-07-29
 
 # SNS 계정 정보 (수집할 플랫폼만 입력)
 TWITTER_USERNAME=your-handle
@@ -182,7 +188,11 @@ collection:
     enabled: true     # 중국 산업/AI 뉴스플래시 (HTTP, 로그인 불필요)
   producthunt:
     enabled: true     # AI 제품 런칭·쇼케이스 (RSS, 로그인 불필요)
+  news:
+    enabled: true     # 외신·AI 기업 1차 소스 RSS 13개 피드 (HTTP, 로그인 불필요)
 ```
+
+뉴스 RSS 피드 목록(`collection.news.feeds`)은 TechCrunch·The Verge 등 정식 매체(official), Bloomberg·The Information 등 페이월 헤드라인(paywalled), OpenAI·Anthropic·DeepMind 등 1차 소스(primary) 3티어로 구성되며 자유롭게 추가/삭제할 수 있습니다.
 
 전역 `collection.max_age_days`(기본 2일)보다 오래된 게시물은 수집 단계에서 걸러집니다.
 
@@ -248,7 +258,7 @@ like:
 # 즉시 수집 (모든 소스)
 python main.py collect-now
 
-# 특정 소스만 수집 (twitter / threads / linkedin / dcinside / 36kr / producthunt)
+# 특정 소스만 수집 (twitter / threads / linkedin / dcinside / 36kr / producthunt / news)
 python main.py collect-now twitter
 
 # 실행 중인 서버에 수동 트리거
@@ -268,7 +278,8 @@ python main.py serve --no-scheduler
 ┌───────────────────────────────────────────────┐
 │   수집기 (Python, 로컬)                        │
 │  X · Threads · LinkedIn (Chrome CDP)          │
-│  DCInside · 36kr · Product Hunt (HTTP)        │
+│  DCInside · 36kr · Product Hunt ·             │
+│  뉴스 RSS 13피드 (HTTP)                        │
 └──────────────┬────────────────────────────────┘
                │ 수집 (소스별 20~120분)
                ▼
@@ -420,4 +431,4 @@ netstat -ano | findstr :9222
 
 ---
 
-**마지막 업데이트**: 2026-07-10
+**마지막 업데이트**: 2026-07-29
