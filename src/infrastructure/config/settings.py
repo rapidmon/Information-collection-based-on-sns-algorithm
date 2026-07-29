@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     # claude_code 백엔드를 다른 머신/서비스 컨텍스트에서 쓸 때만 필요(선택).
     # 본인 머신에서 claude 로그인이 되어 있으면 비워둬도 됨.
     claude_code_oauth_token: str = ""
+    # 위 토큰의 만료일(YYYY-MM-DD). `claude setup-token` 발급 시점 +1년을 적어두면
+    # 만료 7일 전부터 매일 슬랙 DM 알림을 보낸다 (slack.alert_user_id 필요).
+    claude_code_oauth_token_expires_at: str = ""
     smtp_host: str = "smtp.gmail.com"
     smtp_port: int = 587
     smtp_user: str = ""
@@ -175,6 +178,9 @@ class SlackConfig:
         self.winner_websearch: bool = data.get("winner_websearch", True)
         # 게시된 항목 ts↔항목 매핑 저장 파일 (집계 잡이 읽음, 매일 덮어씀)
         self.state_path: str = data.get("state_path", "data/slack_briefing_state.json")
+        # 운영 알림(토큰 만료 등) DM 수신자의 슬랙 멤버 ID ("U0123..." 형식).
+        # 프로필 → ⋮ → '멤버 ID 복사'로 확인. 비우면 DM 알림 비활성.
+        self.alert_user_id: str = data.get("alert_user_id", "")
 
 
 class ScoringConfig:

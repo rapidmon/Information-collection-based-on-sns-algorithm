@@ -281,6 +281,32 @@ class SlackNotifier:
             return data
         raise RuntimeError(f"Slack API {method} 재시도 초과")
 
+    async def send_dm(self, text: str) -> dict:
+        """설정된 운영 알림 수신자(alert_user_id)에게 개인 DM을 보낸다.
+
+        채널 게시와 독립적인 운영 알림 경로 — enabled/channel 설정과 무관하게
+        토큰 + alert_user_id만 있으면 동작한다. im:write 스코프가 없으면
+        conversations.open이 missing_scope로 실패하므로 앱 재설치가 필요하다.
+        """
+        user_id = self._config.alert_user_id
+        if not self._token or not user_id:
+            return {"sent": False, "reason": "not_configured"}
+
+        async with httpx.AsyncClient(
+            timeout=30.0,
+            headers={"Authorization": f"Bearer {self._token}"},
+        ) as client:
+            opened = await self._call(client, "conversations.open", {"users": user_id})
+            dm_channel = opened["channel"]["id"]
+            await self._call(client, "chat.postMessage", {
+                "channel": dm_channel,
+                "text": text,
+                "unfurl_links": False,
+                "unfurl_media": False,
+            })
+        logger.info(f"슬랙 DM 발송: {user_id} — {text[:60]}")
+        return {"sent": True}
+
     async def send_briefing(self, briefing, date_str: str) -> dict:
         """헤더 1개 + 항목별 스레드 댓글 게시, 댓글마다 투표 리액션 선부착."""
         if not self._config.enabled:

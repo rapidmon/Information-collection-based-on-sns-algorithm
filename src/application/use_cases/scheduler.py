@@ -6,7 +6,7 @@ APScheduler를 사용해 수집, AI 처리, 브리핑 생성/전달을 자동화
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -18,6 +18,34 @@ from src.domain.exceptions import SessionExpiredError
 from src.infrastructure.config.container import Container
 
 logger = logging.getLogger(__name__)
+
+# 토큰 만료 며칠 전부터 매일 DM 알림을 보낼지
+TOKEN_ALERT_DAYS_BEFORE = 7
+
+
+def token_expiry_message(expires_at: str, today: date) -> str | None:
+    """Claude OAuth 토큰 만료 알림 문구를 만든다. 알림 불필요 시 None.
+
+    D-7부터 매일, 만료 후에도 갱신 전까지 계속 알린다 (한 번 놓치면 끝인
+    일회성 알림 대신 — 갱신해서 .env의 만료일을 바꾸면 자연히 멈춘다).
+    날짜 형식이 잘못됐으면 None 대신 예외를 던져 호출부가 로그를 남기게 한다.
+    """
+    expiry = date.fromisoformat(expires_at.strip())
+    days_left = (expiry - today).days
+    if days_left > TOKEN_ALERT_DAYS_BEFORE:
+        return None
+    renew_guide = (
+        "갱신: 터미널에서 `claude setup-token` 실행 → 새 토큰과 만료일을 "
+        ".env의 CLAUDE_CODE_OAUTH_TOKEN / CLAUDE_CODE_OAUTH_TOKEN_EXPIRES_AT에 "
+        "반영 → 서버 재시작"
+    )
+    if days_left < 0:
+        return (
+            f"🚨 *Claude 토큰이 {-days_left}일 전에 만료됐습니다* ({expires_at}). "
+            f"카드뉴스 생성이 실패하고 있을 수 있어요.\n{renew_guide}"
+        )
+    when = "오늘" if days_left == 0 else f"D-{days_left} ({expires_at})"
+    return f"⏰ *Claude 토큰 만료 {when}* — 미리 갱신해 주세요.\n{renew_guide}"
 
 
 class Orchestrator:
@@ -133,6 +161,27 @@ class Orchestrator:
             max_instances=1,
         )
         logger.info("자동 데이터 정리 등록: 매일 자정 (1개월 이상 데이터 삭제)")
+
+        # ─── Claude 토큰 만료 알림 (매일 09:00, D-7부터 슬랙 DM) ───
+        expires_at = self._c.settings.claude_code_oauth_token_expires_at.strip()
+        if expires_at:
+            try:
+                date.fromisoformat(expires_at)  # 형식 검증만 (판정은 실행 시점 날짜로)
+            except ValueError:
+                logger.warning(
+                    f"CLAUDE_CODE_OAUTH_TOKEN_EXPIRES_AT 형식 오류('{expires_at}') — "
+                    "YYYY-MM-DD로 적어야 만료 알림이 동작합니다"
+                )
+            else:
+                self.scheduler.add_job(
+                    self._check_token_expiry,
+                    trigger=CronTrigger(hour=9, minute=0),
+                    id="token_expiry_alert",
+                    name="Claude Token Expiry Alert",
+                    max_instances=1,
+                    misfire_grace_time=3600,
+                )
+                logger.info(f"Claude 토큰 만료 알림 등록: 매일 09:00 (만료일 {expires_at})")
 
     def _collection_trigger(self, interval_minutes: int, offset: int):
         """수집 트리거를 KST 벽시계 정각에 정렬해서 만든다 (스태거 오프셋 유지).
@@ -299,3 +348,24 @@ class Orchestrator:
             )
         except Exception as e:
             logger.error(f"[scheduler] 데이터 정리 오류: {e}")
+
+    async def _check_token_expiry(self) -> None:
+        """Claude OAuth 토큰 만료 임박(D-7~) 시 슬랙 DM 알림."""
+        expires_at = self._c.settings.claude_code_oauth_token_expires_at.strip()
+        try:
+            msg = token_expiry_message(expires_at, datetime.now(tz=self._tz).date())
+        except ValueError as e:
+            logger.warning(f"[scheduler] 토큰 만료일 파싱 실패('{expires_at}'): {e}")
+            return
+        if not msg:
+            return
+        logger.info(f"[scheduler] Claude 토큰 만료 임박 — DM 알림: {expires_at}")
+        try:
+            result = await self._c.slack_notifier.send_dm(msg)
+            if not result.get("sent"):
+                logger.warning(
+                    f"[scheduler] 토큰 만료 DM 미발송({result.get('reason')}) — "
+                    "slack.alert_user_id / SLACK_BOT_TOKEN 확인 필요"
+                )
+        except Exception as e:
+            logger.error(f"[scheduler] 토큰 만료 DM 발송 오류: {e}")

@@ -143,6 +143,9 @@ slack:
   enabled: true
   channel: "#디지랩-담당자-소통용"   # 채널명 또는 채널 ID("C0123...")
   reactions: ["+1", "-1"]     # 선부착할 리액션 이모지 이름 (콜론 없이). [0]=찬성, [1]=반대
+  # 운영 알림(Claude 토큰 만료 D-7 등) DM 수신자 멤버 ID. 프로필 → ⋮ → '멤버 ID 복사'
+  alert_user_id: "U04HPLC134G"           # 예: "U0123ABCDEF". 비우면 DM 알림 꺼짐
+
   # ─ 투표 마감 → 1위 항목 카드뉴스 타이틀 게시 ─
   vote_close_time: "12:00"    # 집계 실행 시각 (HH:MM)
   vote_days: "mon-fri"        # 집계 실행 요일 (주말은 투표 없음 — @멘션으로 수동 처리)
