@@ -32,6 +32,19 @@ class HybridAIProcessor:
         self._openai.set_feedback_examples(examples)
 
     async def filter_and_summarize(self, posts: list[Post]):
+        """필터/요약. `filter_backend` 설정으로 백엔드를 고른다 (기본 openai).
+
+        OpenAI는 토큰당 실지출, Claude CLI는 정액 구독 — 현금을 줄이려면 claude가
+        유리하다. 호출당 고정 오버헤드(~23k)는 거의 전부 cache_read(0.1x)로 잡히고,
+        감량 플래그로 추론을 끄면 출력이 −68% 되어 실측 총 등가가 −45%였다.
+        ⚠️ 다만 무인 파이프라인이 대화형 작업과 구독 한도를 공유하므로
+        전환 후 rate limit 체감을 관찰해야 한다. 실패 시 OpenAI로 폴백한다.
+        """
+        if getattr(self._config, "filter_backend", "openai") == "claude":
+            try:
+                return await self._claude.filter_and_summarize(posts)
+            except Exception as e:
+                logger.warning(f"Claude 필터 실패, OpenAI 폴백: {e}")
         return await self._openai.filter_and_summarize(posts)
 
     async def categorize(self, posts: list[Post]):

@@ -60,6 +60,29 @@ def _resolve_claude_bin() -> str:
     return shutil.which("claude") or shutil.which("claude.cmd") or "claude"
 
 
+# 규칙 기반 배치 호출(필터·분류)용 감량 플래그.
+#
+# 실측 (40건 배치, claude-haiku-4-5, 2026-07-30):
+#   추론 켬 → 출력 6,995 tok / 호출당 총 등가 64,254
+#   추론 끔 → 출력 2,236 tok / 호출당 총 등가 35,270   (출력 −68%, 총 −45%)
+#   판정 결과(40/40건, 관련 8건=20%)와 요약 길이(89자→88자)는 동일했다.
+# 규칙이 프롬프트에 명시된 분류 작업이라 추론이 기여하는 바가 없다.
+# OpenAI 경로가 이미 reasoning_effort="low"를 쓰는 것과 같은 취지 —
+# 이 설정을 빼고 Claude로 옮기면 추론 비용이 조용히 되살아난다.
+#
+# 도구·번들 스킬은 이 작업에서 쓰이지 않아 시스템 프롬프트에서 뺀다.
+# 대부분 캐시되는 자리(호출당 22,961 중 거의 전부가 cache_read)라 절감폭은
+# 작지만 무손실이다.  ⚠️ WebSearch가 필요한 _call_api_with_search 에는 적용하지 않는다.
+_LEAN_TOOLS = [
+    "Bash", "Read", "Write", "Edit", "Glob", "Grep",
+    "WebSearch", "WebFetch", "Task", "TodoWrite", "NotebookEdit",
+]
+_LEAN_SETTINGS = json.dumps(
+    {"disableBundledSkills": True, "alwaysThinkingEnabled": False},
+    separators=(",", ":"),
+)
+
+
 class ClaudeCodeProcessor(BaseLLMProcessor):
     """Claude Code CLI(`claude -p`)를 LLM 백엔드로 쓰는 AI 프로세서.
 
@@ -149,8 +172,15 @@ class ClaudeCodeProcessor(BaseLLMProcessor):
         # 봉투의 result에 모델의 실제 텍스트가 담긴다. 파싱은 base의 _parse_json_response가 처리.
         return envelope.get("result", "")
 
-    def _call_api(self, model: str, prompt: str, max_tokens: int = 4096) -> str:
-        """필터/분류/검증엔 filter 모델, 통합엔 process 모델을 매핑해 호출. (max_tokens는 CLI 무시)"""
+    def _call_api(
+        self, model: str, prompt: str, max_tokens: int = 4096, *, lean: bool = False
+    ) -> str:
+        """필터/분류/검증엔 filter 모델, 통합엔 process 모델을 매핑해 호출. (max_tokens는 CLI 무시)
+
+        lean=True 인 호출에만 감량 플래그를 붙인다 — 근거는 위 _LEAN_* 주석.
+        ⚠️ **모델 티어로 판단하면 안 된다**: judge_tiers 는 model_filter 를 쓰지만
+        피드백 보정 기반의 품질 민감 판정이라 추론이 필요하다. 호출부가 지정한다.
+        """
         claude_model = (
             self._claude_model_process
             if model == self._config.model_process
@@ -159,6 +189,8 @@ class ClaudeCodeProcessor(BaseLLMProcessor):
         args = ["-p", "--output-format", "json", "--max-turns", "1"]
         if claude_model:
             args += ["--model", claude_model]
+        if lean:
+            args += ["--settings", _LEAN_SETTINGS, "--disallowed-tools", *_LEAN_TOOLS]
         return self._run_claude(args, prompt, label="claude CLI")
 
     def _call_api_with_search(

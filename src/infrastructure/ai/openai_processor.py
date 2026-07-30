@@ -148,6 +148,28 @@ def _posts_to_json(posts: list[Post]) -> str:
     return json.dumps(items, ensure_ascii=False, indent=2)
 
 
+def _posts_to_json_filter(posts: list[Post]) -> str:
+    """필터 단계용 JSON — 이 시점에 값이 없는 필드를 빼고 들여쓰기도 없앤다.
+
+    summary/categories/importance_score 는 필터 **이후** 단계가 채우므로 필터
+    시점엔 항상 비어 있다(키만 실려 간다). url 은 게시물 퍼머링크이고 필터 규칙이
+    참조하지 않는다 — "링크만 있고 본문이 3문장 미만" 판정은 text 로 한다.
+    indent 도 모델에 불필요하다.
+
+    실측(40건 배치): 입력 −13.5%. 무손실.
+    """
+    items = [
+        {
+            "post_id": p.id,
+            "source": p.source,
+            "author": p.author,
+            "text": p.content_text[:1000] if p.content_text else "",
+        }
+        for p in posts
+    ]
+    return json.dumps(items, ensure_ascii=False, separators=(",", ":"))
+
+
 def _posts_to_json_lite(posts: list[Post]) -> str:
     """Post 리스트를 프롬프트에 삽입할 JSON 문자열로 변환 (요약 단계용, text 필드 제외)."""
     items = []
@@ -243,8 +265,16 @@ class BaseLLMProcessor:
     # 상태 없는 순수 병합 로직 — 클래스 속성으로 공유(서브클래스 포함)
     _merger = TopicMerger()
 
-    def _call_api(self, model: str, prompt: str, max_tokens: int = 4096) -> str:
-        """LLM 호출. 백엔드별 서브클래스(OpenAIProcessor/ClaudeCodeProcessor)가 구현한다."""
+    def _call_api(
+        self, model: str, prompt: str, max_tokens: int = 4096, *, lean: bool = False
+    ) -> str:
+        """LLM 호출. 백엔드별 서브클래스(OpenAIProcessor/ClaudeCodeProcessor)가 구현한다.
+
+        lean=True 는 "규칙이 프롬프트에 명시된 기계적 배치 작업"이라는 신호다
+        (추론·도구가 품질에 기여하지 않으므로 백엔드가 그것들을 끌 수 있다).
+        ⚠️ **모델 티어로 판단하면 안 된다** — judge_tiers 는 model_filter 를 쓰지만
+        피드백 보정 기반의 품질 민감 판정이라 추론이 필요하다. 작업 단위로 지정한다.
+        """
         raise NotImplementedError
 
     def _curation_model(self) -> str:
@@ -256,15 +286,16 @@ class BaseLLMProcessor:
         results: list[FilterResult] = []
 
         for batch in _chunked(posts, self._config.batch_size_filter):
-            posts_json = _posts_to_json(batch)
+            posts_json = _posts_to_json_filter(batch)
             prompt = FILTER_AND_SUMMARIZE.format(posts_json=posts_json)
 
             try:
                 # gpt-5 계열은 추론 토큰이 completion 한도를 같이 소모 — 배치 40건
                 # JSON이 잘리면 누락 게시물이 비관련 처리되므로 한도를 넉넉히 준다.
                 # to_thread: 동기 API 호출이 이벤트 루프(웹·수집 잡)를 막지 않게.
+                # lean: 규칙이 프롬프트에 명시된 기계적 분류 — 추론/도구가 품질에 기여하지 않는다.
                 response_text = await asyncio.to_thread(
-                    self._call_api, self._config.model_filter, prompt, 16384
+                    self._call_api, self._config.model_filter, prompt, 16384, lean=True
                 )
                 parsed = _parse_json_response(response_text)
 
@@ -318,8 +349,10 @@ class BaseLLMProcessor:
 
             try:
                 # 추론 토큰과 배치 JSON이 한도를 나눠 쓰므로 잘림 방지용 상향
+                # lean: 필터와 같은 기계적 배치 분류. 지금은 OpenAI 경로라 무동작이지만
+                # 향후 이 단계를 Claude로 옮길 때 추론이 되살아나지 않게 미리 표시한다.
                 response_text = await asyncio.to_thread(
-                    self._call_api, self._config.model_filter, prompt, 16384
+                    self._call_api, self._config.model_filter, prompt, 16384, lean=True
                 )
                 parsed = _parse_json_response(response_text)
 
@@ -724,12 +757,17 @@ class OpenAIProcessor(BaseLLMProcessor):
         # Curation needs reliable short JSON, not heavyweight reasoning.
         return self._config.model_filter
 
-    def _call_api(self, model: str, prompt: str, max_tokens: int = 4096) -> str:
+    def _call_api(
+        self, model: str, prompt: str, max_tokens: int = 4096, *, lean: bool = False
+    ) -> str:
         """OpenAI Chat Completions API 동기 호출.
 
         gpt-5 계열(추론 모델)은 추론 토큰이 completion 한도를 같이 소모해
         content가 비어 올 수 있다 — 이 경우 한도를 2배로 올려 1회만 재시도하고,
         그래도 비면 명시적 예외를 던져 호출부의 실패 처리(배치 스킵 등)를 태운다.
+
+        lean 은 받되 사용하지 않는다 — 이 백엔드는 이미 모든 gpt-5 호출에
+        reasoning_effort="low" 를 걸고 있어 추가로 끌 것이 없다.
         """
         is_legacy = "gpt-4o" in model
         params: dict = {

@@ -102,6 +102,12 @@ class ProcessingConfig:
         self.claude_model_filter: str = data.get("claude_model_filter", "claude-haiku-4-5")
         self.claude_model_process: str = data.get("claude_model_process", "claude-sonnet-4-6")
         self.claude_timeout: int = data.get("claude_timeout", 300)
+        # 필터/요약 백엔드: "openai"(기본, 종량 과금) | "claude"(정액 구독)
+        # OpenAI는 토큰당 실지출이고 Claude CLI는 구독 한도를 쓴다 — 현금을 줄이려면
+        # "claude"로 옮기는 것이 최선이나, 무인 파이프라인이 대화형 작업과 한도를
+        # 공유하므로 전환 후 최소 1주일은 rate limit 체감을 관찰할 것.
+        # ⚠️ 되돌릴 때 코드 수정이 필요 없도록 설정으로 뺐다. 실패 시 OpenAI로 자동 폴백.
+        self.filter_backend: str = data.get("filter_backend", "openai")
         self.batch_size_filter: int = data.get("batch_size_filter", 20)
         self.batch_size_categorize: int = data.get("batch_size_categorize", 20)
         self.dedup_chunk_size: int = data.get("dedup_chunk_size", 80)

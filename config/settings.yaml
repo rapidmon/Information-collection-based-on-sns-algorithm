@@ -97,6 +97,12 @@ processing:
   claude_model_filter: "claude-haiku-4-5"    # Claude 폴백/보조용 (CLI 모델 매핑)
   claude_model_process: "claude-sonnet-4-6"  # 발행 확정분 작문 + 독자군 큐레이션
   claude_timeout: 600
+  # 필터/요약 백엔드: openai(종량 과금·기본) | claude(정액 구독)
+  # claude 로 바꾸면 OpenAI 청구액이 ~0으로 가지만 구독 한도를 쓴다.
+  # 실측(40건 배치, haiku-4-5): 판정 40/40건·관련율 20%로 gpt-5-mini와 동일,
+  # 감량 플래그(추론 끔)로 호출당 총 등가 −45%. 오버헤드는 거의 전부 캐시된다.
+  # ⚠️ 전환 후 최소 1주일 rate limit 체감 관찰. 실패 시 openai 자동 폴백.
+  filter_backend: "openai"
   model_filter: "gpt-5-mini"          # OpenAI: 필터/분류/검증 (고빈도 배치, 추론 모델)
   model_process: "gpt-5-mini"         # OpenAI: 작문·큐레이션 폴백 (Claude 실패 시)
   batch_size_filter: 40
