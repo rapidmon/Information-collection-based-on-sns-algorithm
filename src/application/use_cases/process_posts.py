@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import unicodedata
 
 from src.domain.repositories.post_repository import PostRepository
@@ -70,6 +71,37 @@ def _is_obviously_irrelevant(post) -> bool:
     text = unicodedata.normalize("NFC", f"{post.content_text or ''}\n{post.summary or ''}")
     hits = sum(1 for pattern in _BLOCKLIST_PATTERNS if pattern in text)
     return hits >= 2
+
+
+# 결정적 프리필터가 적용되는 소스 — 사용자 피드 SNS만.
+# 큐레이션 소스(news/36kr/producthunt)는 헤드라인 위주의 짧은 본문이 정상이라
+# 길이 기반 컷을 적용하면 진짜 뉴스가 소실된다.
+_PREFILTER_SNS_SOURCES = {"twitter", "threads", "linkedin", "dcinside"}
+_URL_RE = re.compile(r"https?://\S+")
+# 애매하면 통과(LLM 판정)로 두기 위한 보수적 하한. 문자 수 기준(한국어 ≈ 반 문장).
+# 10자: "ㅋㅋㅋ"·"축하드립니다!" 류는 걸리고, "TSMC 2분기 실적 발표"(14자) 같은
+# 헤드라인급 초단문은 통과해 LLM이 판정한다.
+_MIN_TEXT_CHARS = 10       # 링크 없어도 컷: 밈/감상/인사
+_MIN_NONLINK_CHARS = 25    # 링크 제거 후 잔여 본문이 이 미만이면 '링크만 있는 짧은 반응'
+
+
+def _is_obvious_junk(post) -> bool:
+    """LLM 없이 걸러도 안전한 '명백한 쓰레기'만 판정한다 (토큰 0짜리 프리필터).
+
+    필터 프롬프트의 기계적 규칙("링크만 있고 본문 내용이 3문장 미만인 짧은 반응")의
+    보수적 부분집합만 코드로 옮긴 것 — 여기서 걸린 게시물은 LLM이 볼 기회 자체가
+    없으므로(false negative = 뉴스가 조용히 소실) 애매하면 반드시 통과시킨다.
+    내용 기반 판단(광고·스캠·감상)은 계속 LLM 몫이다.
+    """
+    if (post.source or "") not in _PREFILTER_SNS_SOURCES:
+        return False
+    text = unicodedata.normalize("NFC", (post.content_text or "")).strip()
+    if not text:
+        return True
+    if len(text) < _MIN_TEXT_CHARS:
+        return True
+    without_urls = _URL_RE.sub("", text).strip()
+    return len(without_urls) < _MIN_NONLINK_CHARS and without_urls != text
 
 
 def _sanitize_categories(post, categories: list[str]) -> list[str]:
@@ -198,12 +230,34 @@ class ProcessPostsUseCase:
             logger.info(f"기각 이력 자동 차단: {len(pre)}건 (동일 해시 비관련 전례)")
         return keep, pre
 
+    def _split_obvious_junk(self, posts: list) -> tuple[list, list]:
+        """명백한 쓰레기(초단문·링크만)를 결정적으로 분리해 LLM 배치에서 뺀다.
+
+        관련율이 ~20%라 배치의 대부분이 버려질 게시물인데, 그중 기계적으로
+        판정 가능한 부분집합은 토큰을 쓰지 않고 자른다 — Claude 구독 한도
+        (대화형 작업과 공유)를 아끼는 1차 수단.
+        """
+        keep, junk = [], []
+        for p in posts:
+            if _is_obvious_junk(p):
+                p.is_relevant = False
+                p.summary = "[filtered]"
+                junk.append(p)
+            else:
+                keep.append(p)
+        if junk:
+            logger.info(f"결정적 프리필터 컷: {len(junk)}건 (초단문·링크만) — LLM 미투입")
+        return keep, junk
+
     async def _process_chunk(self, posts: list) -> dict[str, int]:
         """단일 청크에 대해 필터→검증→분류→업데이트 파이프라인을 실행."""
         logger.info(f"AI 처리 시작: {len(posts)}건")
 
-        # 0. 기각 이력 자동 차단 — 비관련 전례가 있는 동일 해시는 LLM을 태우지 않는다
+        # 0. 결정적 컷 2종 — LLM을 태우지 않는다:
+        #    기각 이력 자동 차단(동일 해시 비관련 전례) + 명백한 쓰레기 프리필터
         posts, pre_rejected = self._split_previously_rejected(posts)
+        posts, junk = self._split_obvious_junk(posts)
+        pre_rejected += junk
         total_count = len(posts) + len(pre_rejected)
 
         # 1. 관련성 필터 + 요약 (자동 차단분 제외)

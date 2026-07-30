@@ -130,6 +130,7 @@ class ClaudeCodeProcessor(BaseLLMProcessor):
         prompt: str,
         label: str = "claude",
         use_system_prompt: bool = True,
+        model: str | None = None,
     ) -> str:
         """`claude -p`를 헤드리스로 실행하고 응답 봉투의 result(텍스트)를 반환한다.
 
@@ -166,6 +167,21 @@ class ClaudeCodeProcessor(BaseLLMProcessor):
         except json.JSONDecodeError as e:
             raise LLMBackendError(f"{label} 응답 봉투 JSON 파싱 실패: {(proc.stdout or '')[:300]}") from e
 
+        # 구독 한도 소비 실측용 — OpenAI 경로의 [usage] 포맷과 맞춰
+        # scripts/usage_report.py 가 양쪽을 합산할 수 있게 한다.
+        # is_error 여부와 무관하게 기록한다(실패한 호출도 토큰은 소비됨).
+        # 캐시를 따로 보는 이유: 한도 가중치가 다르다(cache_read ~0.1x) —
+        # in+out 만 보면 고정 오버헤드(~23k)가 실제보다 10배 커 보인다.
+        usage = envelope.get("usage") or {}
+        if usage:
+            log_model = model or next(iter(envelope.get("modelUsage") or {}), "claude")
+            logger.info(
+                f"[usage] model={log_model} in={usage.get('input_tokens', 0)} "
+                f"out={usage.get('output_tokens', 0)} "
+                f"(cache_read={usage.get('cache_read_input_tokens', 0)} "
+                f"cache_write={usage.get('cache_creation_input_tokens', 0)})"
+            )
+
         if envelope.get("is_error"):
             raise LLMBackendError(f"{label} 처리 오류: {str(envelope.get('result'))[:300]}")
 
@@ -191,7 +207,7 @@ class ClaudeCodeProcessor(BaseLLMProcessor):
             args += ["--model", claude_model]
         if lean:
             args += ["--settings", _LEAN_SETTINGS, "--disallowed-tools", *_LEAN_TOOLS]
-        return self._run_claude(args, prompt, label="claude CLI")
+        return self._run_claude(args, prompt, label="claude CLI", model=claude_model)
 
     def _call_api_with_search(
         self,
@@ -210,7 +226,8 @@ class ClaudeCodeProcessor(BaseLLMProcessor):
         if claude_model:
             args += ["--model", claude_model]
         return self._run_claude(
-            args, prompt, label="claude WebSearch", use_system_prompt=use_system_prompt
+            args, prompt, label="claude WebSearch",
+            use_system_prompt=use_system_prompt, model=claude_model,
         )
 
     async def run_freeform(
@@ -233,7 +250,8 @@ class ClaudeCodeProcessor(BaseLLMProcessor):
         if self._claude_model_process:
             args += ["--model", self._claude_model_process]
         return await asyncio.to_thread(
-            self._run_claude, args, prompt, "claude freeform", False
+            self._run_claude, args, prompt, "claude freeform", False,
+            self._claude_model_process,
         )
 
     async def verify_claims(self, posts: list) -> list:

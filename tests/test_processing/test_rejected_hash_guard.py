@@ -73,7 +73,9 @@ async def test_hash_lookup_failure_falls_back_to_llm():
     ai = FakeAI()
     uc = ProcessPostsUseCase(post_repo=repo, ai_processor=ai)
 
-    posts = [_post(1, "글", "h1")]
+    # 결정적 프리필터(초단문 컷)에 걸리지 않는 길이의 본문이어야
+    # 이 테스트가 검증하려는 '해시 가드' 경로만 격리된다
+    posts = [_post(1, "이력 조회 장애 상황을 검증하는 게시물 본문", "h1")]
     await uc._process_chunk(posts)
 
     # 이력 조회가 죽어도 파이프라인은 기존대로 LLM 필터를 탄다
@@ -85,6 +87,6 @@ async def test_no_hash_posts_pass_through():
     ai = FakeAI()
     uc = ProcessPostsUseCase(post_repo=repo, ai_processor=ai)
 
-    posts = [_post(1, "해시 없는 글", None)]
+    posts = [_post(1, "해시가 없는 게시물도 기존대로 LLM 필터를 탄다", None)]
     await uc._process_chunk(posts)
     assert [p.id for p in ai.filtered[0]] == [1]
