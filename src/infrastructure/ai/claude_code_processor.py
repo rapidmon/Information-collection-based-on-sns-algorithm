@@ -250,6 +250,9 @@ class ClaudeCodeProcessor(BaseLLMProcessor):
                 EXTRACT_CLAIMS.format(posts_json=_posts_to_json_lite(posts)),
             )
             claims = _parse_json_response(resp)
+        except LLMBackendError:
+            # CLI 장애는 hybrid의 OpenAI 폴백으로 — 검증 전체 스킵(스캠 통과)보다 낫다
+            raise
         except Exception as e:
             logger.warning(f"주장 추출 실패(검증 스킵): {e}")
             return [VerificationResult(post_id=p.id, credibility="verified") for p in posts]
@@ -280,6 +283,8 @@ class ClaudeCodeProcessor(BaseLLMProcessor):
                     reason=item.get("reason"),
                 ))
                 verified_ids.add(pid)
+        except LLMBackendError:
+            raise  # CLI 장애는 hybrid의 OpenAI 폴백으로 — 전체 통과보다 낫다
         except Exception as e:
             logger.warning(f"Claude 웹검증 실패(스킵/통과): {e}")
 

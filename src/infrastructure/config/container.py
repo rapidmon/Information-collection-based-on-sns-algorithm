@@ -63,8 +63,9 @@ class Container:
         self.run_repo = SQLiteCollectionRunRepository()
 
         # ─── Infrastructure Services ───
-        # AI 백엔드는 하이브리드 고정: 고빈도 배치(필터·분류·검증)=OpenAI,
-        # 저빈도·품질 민감(발행 작문·큐레이션)=Claude Code. (백엔드 선택 옵션은 제거됨)
+        # AI 백엔드는 하이브리드: 고빈도 배치(필터·분류·검증 등)는 routine_backend
+        # 설정으로 선택(현재 claude=정액 구독), 발행 작문·큐레이션은 Claude 고정.
+        # 어느 쪽이든 백엔드 장애 시 반대편(OpenAI)으로 자동 폴백한다.
         openai_processor = OpenAIProcessor(
             api_key=settings.openai_api_key,
             config=app_config.processing,

@@ -308,6 +308,11 @@ class BaseLLMProcessor:
                             language=item.get("language"),
                         )
                     )
+            except LLMBackendError:
+                # 백엔드 자체 장애(CLI 미설치·인증 만료·한도 소진·타임아웃)는 비관련
+                # 컷 대신 상위(hybrid)로 전파 — 여기서 삼키면 게시물이 조용히 비관련
+                # 처리되어 OpenAI 폴백이 영원히 작동하지 않는다.
+                raise
             except Exception as e:
                 logger.error(f"필터/요약 API 호출 실패: {e}")
                 # 실패 시 비관련으로 컷(요약 없음). 과거엔 '전부 관련'으로 통과시켰으나,
@@ -349,10 +354,12 @@ class BaseLLMProcessor:
 
             try:
                 # 추론 토큰과 배치 JSON이 한도를 나눠 쓰므로 잘림 방지용 상향
-                # lean: 필터와 같은 기계적 배치 분류. 지금은 OpenAI 경로라 무동작이지만
-                # 향후 이 단계를 Claude로 옮길 때 추론이 되살아나지 않게 미리 표시한다.
+                # lean 아님: 분류는 독자 피드백 few-shot 보정(feedback_block)이 걸리는
+                # 중요도 채점을 포함한다 — judge_tiers와 같은 품질 민감 판정이라
+                # 추론을 끄지 않는다. 물량도 필터 통과분(관련율 ~20%)뿐이라 필터와 달리
+                # 토큰 지배 요인이 아니다.
                 response_text = await asyncio.to_thread(
-                    self._call_api, self._config.model_filter, prompt, 16384, lean=True
+                    self._call_api, self._config.model_filter, prompt, 16384
                 )
                 parsed = _parse_json_response(response_text)
 
@@ -365,6 +372,8 @@ class BaseLLMProcessor:
                             keywords=item.get("keywords", []),
                         )
                     )
+            except LLMBackendError:
+                raise  # 백엔드 장애는 상위(hybrid)로 — OpenAI 폴백 트리거
             except Exception as e:
                 # 폴백 결과를 만들지 않고 배치를 통째로 누락시킨다 — 과거의
                 # ["Other"] 폴백은 sanitize에서 전멸해 배치 40건이 비관련으로
@@ -407,6 +416,8 @@ class BaseLLMProcessor:
                 tier = (it.get("tier") or "minor").lower()
                 if isinstance(idx, int) and 0 <= idx < len(tiers) and tier in ("major", "notable", "minor"):
                     tiers[idx] = tier
+        except LLMBackendError:
+            raise  # 백엔드 장애는 상위(hybrid)로 — 전부-minor 강등 대신 OpenAI 폴백
         except Exception as e:
             logger.warning(f"티어 판정 실패(전부 minor 처리): {e}")
 
@@ -639,6 +650,8 @@ class BaseLLMProcessor:
                 self._config.model_process, prompt, max_tokens=8192
             )
             groups = _parse_json_response(response_text)
+        except LLMBackendError:
+            raise  # 백엔드 장애는 상위(hybrid)로 — 유사도 폴백보다 OpenAI 의미 병합이 낫다
         except Exception as e:
             logger.warning(f"전역 통합 LLM 실패, 폴백 사용: {e}")
             return None
@@ -851,6 +864,10 @@ class OpenAIProcessor(BaseLLMProcessor):
                     self._call_api, self._config.model_filter, prompt, 8192
                 )
                 parsed = _parse_json_response(response_text)
+            except LLMBackendError:
+                # 백엔드 장애는 상위(hybrid)로 — 청크 스킵(중복 발행 허용)보다
+                # OpenAI로 판정을 완주하는 쪽이 낫다.
+                raise
             except Exception as e:
                 logger.warning(f"기브리핑 판정 청크 실패(해당 청크만 스킵): {e}")
                 continue

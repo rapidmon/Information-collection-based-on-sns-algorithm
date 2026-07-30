@@ -93,18 +93,18 @@ categories:
     keywords: ["쇼케이스", "showcase", "만들었", "출시", "런칭", "launch", "데모", "demo", "사이드프로젝트", "side project", "바이브코딩", "vibe coding", "Product Hunt", "v0", "Lovable", "Bolt", "made with", "built with"]
 
 processing:
-  # AI 백엔드는 하이브리드 고정: 필터·분류·검증=OpenAI / 발행작문·큐레이션=Claude
-  claude_model_filter: "claude-haiku-4-5"    # Claude 폴백/보조용 (CLI 모델 매핑)
+  claude_model_filter: "claude-haiku-4-5"    # Claude: 고빈도 배치 (필터/분류/검증/기브리핑판정)
   claude_model_process: "claude-sonnet-4-6"  # 발행 확정분 작문 + 독자군 큐레이션
   claude_timeout: 600
-  # 필터/요약 백엔드: openai(종량 과금·기본) | claude(정액 구독)
-  # claude 로 바꾸면 OpenAI 청구액이 ~0으로 가지만 구독 한도를 쓴다.
-  # 실측(40건 배치, haiku-4-5): 판정 40/40건·관련율 20%로 gpt-5-mini와 동일,
-  # 감량 플래그(추론 끔)로 호출당 총 등가 −45%. 오버헤드는 거의 전부 캐시된다.
-  # ⚠️ 전환 후 최소 1주일 rate limit 체감 관찰. 실패 시 openai 자동 폴백.
-  filter_backend: "openai"
-  model_filter: "gpt-5-mini"          # OpenAI: 필터/분류/검증 (고빈도 배치, 추론 모델)
-  model_process: "gpt-5-mini"         # OpenAI: 작문·큐레이션 폴백 (Claude 실패 시)
+  # 고빈도 배치(필터·분류·검증·기브리핑판정·통합가드) 백엔드:
+  #   openai(종량 과금) | claude(정액 구독)
+  # claude면 OpenAI 청구액이 ~0으로 가지만 구독 한도(대화형 작업과 공유)를 쓴다.
+  # 토큰 절감: 물량 지배 단계인 필터만 추론 끔(호출당 총 등가 −45%, 판정 품질 동일 실측),
+  # 품질 민감 단계(중요도 채점·기브리핑 판정·티어)는 추론 유지. 오버헤드는 거의 전부 캐시.
+  # ⚠️ 전환 후 최소 1주일 rate limit 체감 관찰. 백엔드 장애 시 openai 자동 폴백.
+  routine_backend: "claude"
+  model_filter: "gpt-5-mini"          # OpenAI 폴백: 필터/분류/검증 (추론 모델)
+  model_process: "gpt-5-mini"         # OpenAI 폴백: 작문·큐레이션 (Claude 실패 시)
   batch_size_filter: 40
   batch_size_categorize: 40
   dedup_chunk_size: 30         # 미사용 (결정적 클러스터링은 청크 개념 없음)
