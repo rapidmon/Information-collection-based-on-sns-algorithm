@@ -266,7 +266,13 @@ class BaseLLMProcessor:
     _merger = TopicMerger()
 
     def _call_api(
-        self, model: str, prompt: str, max_tokens: int = 4096, *, lean: bool = False
+        self,
+        model: str,
+        prompt: str,
+        max_tokens: int = 4096,
+        *,
+        lean: bool = False,
+        tier: str = "filter",
     ) -> str:
         """LLM 호출. 백엔드별 서브클래스(OpenAIProcessor/ClaudeCodeProcessor)가 구현한다.
 
@@ -274,6 +280,12 @@ class BaseLLMProcessor:
         (추론·도구가 품질에 기여하지 않으므로 백엔드가 그것들을 끌 수 있다).
         ⚠️ **모델 티어로 판단하면 안 된다** — judge_tiers 는 model_filter 를 쓰지만
         피드백 보정 기반의 품질 민감 판정이라 추론이 필요하다. 작업 단위로 지정한다.
+
+        tier("filter"|"process")는 호출부가 의도한 모델 등급이다. model 인자는
+        OpenAI 모델명이라 Claude 백엔드는 자기 모델로 번역해야 하는데, 설정에서
+        model_filter == model_process 로 겹칠 수 있어 문자열 비교로는 복원이
+        불가능하다(실사고: 필터 전량이 sonnet으로 매핑). 발행 작문·병합처럼
+        상위 모델이 필요한 호출부만 tier="process"를 명시한다.
         """
         raise NotImplementedError
 
@@ -523,7 +535,8 @@ class BaseLLMProcessor:
 
             try:
                 response_text = await asyncio.to_thread(
-                    self._call_api, self._config.model_process, prompt, 8192
+                    self._call_api, self._config.model_process, prompt, 8192,
+                    tier="process",
                 )
                 parsed = _parse_json_response(response_text)
             except LLMBackendError:
@@ -585,7 +598,8 @@ class BaseLLMProcessor:
         for attempt in range(2):
             try:
                 response_text = await asyncio.to_thread(
-                    self._call_api, self._curation_model(), prompt, 8192
+                    self._call_api, self._curation_model(), prompt, 8192,
+                    tier="process",
                 )
                 data = _parse_json_object(response_text)
                 break
@@ -647,7 +661,7 @@ class BaseLLMProcessor:
 
         try:
             response_text = self._call_api(
-                self._config.model_process, prompt, max_tokens=8192
+                self._config.model_process, prompt, max_tokens=8192, tier="process"
             )
             groups = _parse_json_response(response_text)
         except LLMBackendError:
@@ -724,7 +738,7 @@ class BaseLLMProcessor:
 
             try:
                 response_text = self._call_api(
-                    self._config.model_process, prompt, max_tokens=4096
+                    self._config.model_process, prompt, max_tokens=4096, tier="process"
                 )
                 sub_groups = _parse_json_response(response_text)
 
@@ -771,7 +785,13 @@ class OpenAIProcessor(BaseLLMProcessor):
         return self._config.model_filter
 
     def _call_api(
-        self, model: str, prompt: str, max_tokens: int = 4096, *, lean: bool = False
+        self,
+        model: str,
+        prompt: str,
+        max_tokens: int = 4096,
+        *,
+        lean: bool = False,
+        tier: str = "filter",
     ) -> str:
         """OpenAI Chat Completions API 동기 호출.
 
@@ -779,8 +799,9 @@ class OpenAIProcessor(BaseLLMProcessor):
         content가 비어 올 수 있다 — 이 경우 한도를 2배로 올려 1회만 재시도하고,
         그래도 비면 명시적 예외를 던져 호출부의 실패 처리(배치 스킵 등)를 태운다.
 
-        lean 은 받되 사용하지 않는다 — 이 백엔드는 이미 모든 gpt-5 호출에
-        reasoning_effort="low" 를 걸고 있어 추가로 끌 것이 없다.
+        lean/tier 는 받되 사용하지 않는다 — 이 백엔드는 model 인자가 곧 실제
+        모델명이고(번역 불필요), 모든 gpt-5 호출에 이미 reasoning_effort="low"
+        를 걸고 있어 추가로 끌 것도 없다.
         """
         is_legacy = "gpt-4o" in model
         params: dict = {

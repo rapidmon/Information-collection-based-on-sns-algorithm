@@ -189,18 +189,28 @@ class ClaudeCodeProcessor(BaseLLMProcessor):
         return envelope.get("result", "")
 
     def _call_api(
-        self, model: str, prompt: str, max_tokens: int = 4096, *, lean: bool = False
+        self,
+        model: str,
+        prompt: str,
+        max_tokens: int = 4096,
+        *,
+        lean: bool = False,
+        tier: str = "filter",
     ) -> str:
-        """필터/분류/검증엔 filter 모델, 통합엔 process 모델을 매핑해 호출. (max_tokens는 CLI 무시)
+        """호출부가 명시한 tier로 Claude 모델을 고른다. (max_tokens는 CLI 무시, model은 OpenAI명이라 미사용)
+
+        tier 문자열 비교여야 하는 이유: 과거엔 model 인자를 config.model_process
+        와 비교해 매핑했는데, 설정에서 model_filter == model_process("gpt-5-mini")
+        가 되자 필터/분류 전량이 sonnet으로 오매핑되어 구독 한도를 상위 모델
+        요율로 소모했다(2026-07-30 실사고). OpenAI 모델명으로는 호출부의 의도를
+        복원할 수 없다 — 티어는 호출부가 직접 말해야 한다.
 
         lean=True 인 호출에만 감량 플래그를 붙인다 — 근거는 위 _LEAN_* 주석.
-        ⚠️ **모델 티어로 판단하면 안 된다**: judge_tiers 는 model_filter 를 쓰지만
+        ⚠️ **모델 티어로 판단하면 안 된다**: judge_tiers 는 filter 티어(haiku)지만
         피드백 보정 기반의 품질 민감 판정이라 추론이 필요하다. 호출부가 지정한다.
         """
         claude_model = (
-            self._claude_model_process
-            if model == self._config.model_process
-            else self._claude_model_filter
+            self._claude_model_process if tier == "process" else self._claude_model_filter
         )
         args = ["-p", "--output-format", "json", "--max-turns", "1"]
         if claude_model:
