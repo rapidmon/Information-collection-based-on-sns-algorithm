@@ -93,8 +93,12 @@ categories:
     keywords: ["쇼케이스", "showcase", "만들었", "출시", "런칭", "launch", "데모", "demo", "사이드프로젝트", "side project", "바이브코딩", "vibe coding", "Product Hunt", "v0", "Lovable", "Bolt", "made with", "built with"]
 
 processing:
-  claude_model_filter: "claude-haiku-4-5"    # Claude: 고빈도 배치 (필터/분류/검증/기브리핑판정)
+  claude_model_filter: "claude-haiku-4-5"    # Claude: 고빈도 배치 (필터/분류/검증)
   claude_model_process: "claude-sonnet-4-6"  # 발행 확정분 작문 + 독자군 큐레이션
+  # 브리핑 dedup 두 단계 — 7월 사고 이력(23일 recall 붕괴, 24일 precision 붕괴)으로
+  # 모델을 독립 키로 분리. 둘 다 하루 1회·소규모 호출이라 한도 영향은 미미하다.
+  claude_model_dedup: "claude-opus-4-8"          # 기브리핑 판정 (find_covered_topics)
+  claude_model_consolidate: "claude-haiku-4-5"   # 발행 확정분 동일 사건 병합 가드
   claude_timeout: 600
   # 고빈도 배치(필터·분류·검증·기브리핑판정·통합가드) 백엔드:
   #   openai(종량 과금) | claude(정액 구독)

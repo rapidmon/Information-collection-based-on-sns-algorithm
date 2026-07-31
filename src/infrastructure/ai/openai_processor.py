@@ -281,11 +281,13 @@ class BaseLLMProcessor:
         ⚠️ **모델 티어로 판단하면 안 된다** — judge_tiers 는 model_filter 를 쓰지만
         피드백 보정 기반의 품질 민감 판정이라 추론이 필요하다. 작업 단위로 지정한다.
 
-        tier("filter"|"process")는 호출부가 의도한 모델 등급이다. model 인자는
-        OpenAI 모델명이라 Claude 백엔드는 자기 모델로 번역해야 하는데, 설정에서
-        model_filter == model_process 로 겹칠 수 있어 문자열 비교로는 복원이
-        불가능하다(실사고: 필터 전량이 sonnet으로 매핑). 발행 작문·병합처럼
-        상위 모델이 필요한 호출부만 tier="process"를 명시한다.
+        tier("filter"|"process"|"dedup"|"consolidate")는 호출부가 의도한 모델
+        등급이다. model 인자는 OpenAI 모델명이라 Claude 백엔드는 자기 모델로
+        번역해야 하는데, 설정에서 model_filter == model_process 로 겹칠 수 있어
+        문자열 비교로는 복원이 불가능하다(실사고: 필터 전량이 sonnet으로 매핑).
+        발행 작문처럼 상위 모델이 필요한 호출부는 tier="process", 기브리핑 판정은
+        tier="dedup", 발행 확정분 병합 가드는 tier="consolidate"를 명시한다 —
+        뒤의 둘은 Claude 백엔드에서 각각 독립된 설정 키로 모델이 갈린다.
         """
         raise NotImplementedError
 
@@ -633,9 +635,90 @@ class BaseLLMProcessor:
         )
         return curation
 
+    async def find_covered_topics(
+        self, topics: list[MergedTopic], recent_items: list[str]
+    ) -> list[int]:
+        """최근 브리핑에서 이미 다룬 사건과 같은 사건인 토픽의 인덱스 목록.
+
+        후보를 청크로 나눠 판정한다 — 수백 개를 단일 호출로 비교하면
+        건초더미가 커져 명백한 중복도 놓친다.
+        청크 하나가 실패하면 해당 청크만 건너뛴다(중복 발행이 잘못 삭제보다 낫다).
+
+        tier="dedup": 7월 두 차례 dedup 사고(recall 붕괴→precision 붕괴)의
+        판정 지점이라 백엔드 최상위 모델로 라우팅한다. 하루 1회 실행이라
+        토큰 영향은 미미하다.
+        """
+        if not topics or not recent_items:
+            return []
+
+        recent_block = "\n".join(f"- {s}" for s in recent_items)
+        indexed = list(enumerate(topics))
+        dup_indexes: list[int] = []
+        ungrounded = 0
+        for chunk in _chunked(indexed, COVERAGE_DEDUP_CHUNK_SIZE):
+            chunk_index_set = {i for i, _ in chunk}
+            candidates = json.dumps(
+                [
+                    {
+                        "index": i,
+                        "headline": t.headline,
+                        "summary": (t.body_bullets or [""])[0],
+                    }
+                    for i, t in chunk
+                ],
+                ensure_ascii=False,
+                indent=2,
+            )
+            prompt = RECENT_COVERAGE_DEDUP.format(
+                recent_items=recent_block,
+                candidates=candidates,
+            )
+            try:
+                response_text = await asyncio.to_thread(
+                    self._call_api, self._config.model_filter, prompt, 8192,
+                    tier="dedup",
+                )
+                parsed = _parse_json_response(response_text)
+            except LLMBackendError:
+                # 백엔드 장애는 상위(hybrid)로 — 청크 스킵(중복 발행 허용)보다
+                # OpenAI로 판정을 완주하는 쪽이 낫다.
+                raise
+            except Exception as e:
+                logger.warning(f"기브리핑 판정 청크 실패(해당 청크만 스킵): {e}")
+                continue
+
+            for item in parsed:
+                idx = item.get("index")
+                if not (
+                    item.get("duplicate")
+                    and isinstance(idx, int)
+                    and idx in chunk_index_set
+                ):
+                    continue
+                matched = item.get("matched")
+                if not isinstance(matched, str) or not _matched_in_recent(
+                    matched, recent_items
+                ):
+                    ungrounded += 1
+                    continue
+                dup_indexes.append(idx)
+        if ungrounded:
+            logger.info(
+                f"기브리핑 판정 {ungrounded}건 기각 — 실존하는 최근 항목(matched) 지목 실패"
+            )
+        return dup_indexes
+
+    async def consolidate_topics(self, topics: list[MergedTopic]) -> list[MergedTopic]:
+        """소규모 토픽 목록의 동일 사건 병합 — 발행 확정분 최종 가드용 공개 진입점."""
+        return await self._consolidate_topics(topics)
+
     async def _consolidate_topics(self, topics: list[MergedTopic]) -> list[MergedTopic]:
         """최종 전역 통합. 토픽 수가 적당하면 전체를 LLM에 한 번에 보내 의미 기반 병합,
-        너무 많으면 토큰 유사도 기반(_cross_chunk_merge) 폴백."""
+        너무 많으면 토큰 유사도 기반(_cross_chunk_merge) 폴백.
+
+        이 경로(_global_llm_merge·_cross_chunk_merge 포함)는 발행 확정분 최종
+        가드(consolidate_topics)에서만 쓰인다 — tier="consolidate" 로 바꿔도
+        다른 파이프라인 단계의 모델은 바뀌지 않는다."""
         if len(topics) < 2:
             return topics
         if len(topics) <= 80:
@@ -661,7 +744,7 @@ class BaseLLMProcessor:
 
         try:
             response_text = self._call_api(
-                self._config.model_process, prompt, max_tokens=8192, tier="process"
+                self._config.model_process, prompt, max_tokens=8192, tier="consolidate"
             )
             groups = _parse_json_response(response_text)
         except LLMBackendError:
@@ -738,7 +821,7 @@ class BaseLLMProcessor:
 
             try:
                 response_text = self._call_api(
-                    self._config.model_process, prompt, max_tokens=4096, tier="process"
+                    self._config.model_process, prompt, max_tokens=4096, tier="consolidate"
                 )
                 sub_groups = _parse_json_response(response_text)
 
@@ -845,78 +928,6 @@ class OpenAIProcessor(BaseLLMProcessor):
         raise RuntimeError(
             f"LLM 빈 응답 (model={model}, finish_reason={choice.finish_reason})"
         )
-
-    async def find_covered_topics(
-        self, topics: list[MergedTopic], recent_items: list[str]
-    ) -> list[int]:
-        """최근 브리핑에서 이미 다룬 사건과 같은 사건인 토픽의 인덱스 목록.
-
-        후보를 청크로 나눠 판정한다 — 수백 개를 단일 호출로 비교하면
-        건초더미가 커져 명백한 중복도 놓친다.
-        청크 하나가 실패하면 해당 청크만 건너뛴다(중복 발행이 잘못 삭제보다 낫다).
-        """
-        if not topics or not recent_items:
-            return []
-
-        recent_block = "\n".join(f"- {s}" for s in recent_items)
-        indexed = list(enumerate(topics))
-        dup_indexes: list[int] = []
-        ungrounded = 0
-        for chunk in _chunked(indexed, COVERAGE_DEDUP_CHUNK_SIZE):
-            chunk_index_set = {i for i, _ in chunk}
-            candidates = json.dumps(
-                [
-                    {
-                        "index": i,
-                        "headline": t.headline,
-                        "summary": (t.body_bullets or [""])[0],
-                    }
-                    for i, t in chunk
-                ],
-                ensure_ascii=False,
-                indent=2,
-            )
-            prompt = RECENT_COVERAGE_DEDUP.format(
-                recent_items=recent_block,
-                candidates=candidates,
-            )
-            try:
-                response_text = await asyncio.to_thread(
-                    self._call_api, self._config.model_filter, prompt, 8192
-                )
-                parsed = _parse_json_response(response_text)
-            except LLMBackendError:
-                # 백엔드 장애는 상위(hybrid)로 — 청크 스킵(중복 발행 허용)보다
-                # OpenAI로 판정을 완주하는 쪽이 낫다.
-                raise
-            except Exception as e:
-                logger.warning(f"기브리핑 판정 청크 실패(해당 청크만 스킵): {e}")
-                continue
-
-            for item in parsed:
-                idx = item.get("index")
-                if not (
-                    item.get("duplicate")
-                    and isinstance(idx, int)
-                    and idx in chunk_index_set
-                ):
-                    continue
-                matched = item.get("matched")
-                if not isinstance(matched, str) or not _matched_in_recent(
-                    matched, recent_items
-                ):
-                    ungrounded += 1
-                    continue
-                dup_indexes.append(idx)
-        if ungrounded:
-            logger.info(
-                f"기브리핑 판정 {ungrounded}건 기각 — 실존하는 최근 항목(matched) 지목 실패"
-            )
-        return dup_indexes
-
-    async def consolidate_topics(self, topics: list[MergedTopic]) -> list[MergedTopic]:
-        """소규모 토픽 목록의 동일 사건 병합 — 발행 확정분 최종 가드용 공개 진입점."""
-        return await self._consolidate_topics(topics)
 
     async def verify_claims(self, posts: list[Post]) -> list[VerificationResult]:
         """게시물의 핵심 주장을 웹 검색(DuckDuckGo)으로 교차 검증."""

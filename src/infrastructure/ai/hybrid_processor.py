@@ -69,11 +69,12 @@ class HybridAIProcessor:
         return await self._route("verify_claims", posts)
 
     async def find_covered_topics(self, topics: list[MergedTopic], recent_items: list[str]):
-        # 브리핑 생성 시 1회의 헤드라인 비교 배치 — 고빈도 배치와 같은 라우팅
+        # 브리핑 생성 시 1회의 헤드라인 비교 배치 — 고빈도 배치와 같은 라우팅.
+        # Claude 경로는 claude_model_dedup(기본 opus): dedup 사고 이력 지점이라 최상위 모델.
         return await self._route("find_covered_topics", topics, recent_items)
 
     async def consolidate_topics(self, topics: list[MergedTopic]):
-        # 발행 확정분 최종 병합 가드 — 클러스터링과 같은 라우팅
+        # 발행 확정분 최종 병합 가드 — 같은 라우팅. Claude 경로는 claude_model_consolidate(기본 haiku).
         return await self._route("consolidate_topics", topics)
 
     async def judge_tiers(self, topics: list[MergedTopic], calibration_examples: list | None = None):

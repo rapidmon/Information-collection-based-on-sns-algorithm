@@ -97,6 +97,8 @@ class ClaudeCodeProcessor(BaseLLMProcessor):
         claude_bin: str | None = None,
         model_filter: str = "claude-haiku-4-5",
         model_process: str = "claude-sonnet-4-6",
+        model_dedup: str = "claude-opus-4-8",
+        model_consolidate: str = "claude-haiku-4-5",
         timeout: int = 300,
         oauth_token: str | None = None,
         work_dir: str | None = None,
@@ -106,6 +108,8 @@ class ClaudeCodeProcessor(BaseLLMProcessor):
         self._claude_bin = claude_bin or _resolve_claude_bin()
         self._claude_model_filter = model_filter
         self._claude_model_process = model_process
+        self._claude_model_dedup = model_dedup
+        self._claude_model_consolidate = model_consolidate
         self._timeout = timeout
         # 프로젝트 컨텍스트 로딩을 피하기 위한 중립 작업 디렉터리
         self._work_dir = work_dir or tempfile.gettempdir()
@@ -114,7 +118,8 @@ class ClaudeCodeProcessor(BaseLLMProcessor):
             self._env["CLAUDE_CODE_OAUTH_TOKEN"] = oauth_token
         logger.info(
             f"ClaudeCodeProcessor 초기화: bin={self._claude_bin}, "
-            f"filter={model_filter}, process={model_process}"
+            f"filter={model_filter}, process={model_process}, "
+            f"dedup={model_dedup}, consolidate={model_consolidate}"
         )
 
     def _build_command(self, args: list[str]) -> list[str]:
@@ -208,10 +213,16 @@ class ClaudeCodeProcessor(BaseLLMProcessor):
         lean=True 인 호출에만 감량 플래그를 붙인다 — 근거는 위 _LEAN_* 주석.
         ⚠️ **모델 티어로 판단하면 안 된다**: judge_tiers 는 filter 티어(haiku)지만
         피드백 보정 기반의 품질 민감 판정이라 추론이 필요하다. 호출부가 지정한다.
+
+        dedup(기브리핑 판정)·consolidate(발행 확정분 병합 가드)는 브리핑 dedup
+        사고 이력(7/23 recall 붕괴, 7/24 precision 붕괴) 때문에 독립 설정 키로
+        분리 — 하루 1회 실행이라 상위 모델을 써도 토큰 영향이 미미하다.
         """
-        claude_model = (
-            self._claude_model_process if tier == "process" else self._claude_model_filter
-        )
+        claude_model = {
+            "process": self._claude_model_process,
+            "dedup": self._claude_model_dedup,
+            "consolidate": self._claude_model_consolidate,
+        }.get(tier, self._claude_model_filter)
         args = ["-p", "--output-format", "json", "--max-turns", "1"]
         if claude_model:
             args += ["--model", claude_model]

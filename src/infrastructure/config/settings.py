@@ -101,6 +101,12 @@ class ProcessingConfig:
         # Claude 모델 (발행 작문·큐레이션용)
         self.claude_model_filter: str = data.get("claude_model_filter", "claude-haiku-4-5")
         self.claude_model_process: str = data.get("claude_model_process", "claude-sonnet-4-6")
+        # 브리핑 dedup 두 단계는 사고 이력(7월 recall/precision 붕괴) 때문에 모델을
+        # 독립 키로 분리한다. 하루 1회 실행이라 상위 모델을 써도 한도 영향 미미.
+        self.claude_model_dedup: str = data.get("claude_model_dedup", "claude-opus-4-8")
+        self.claude_model_consolidate: str = data.get(
+            "claude_model_consolidate", "claude-haiku-4-5"
+        )
         self.claude_timeout: int = data.get("claude_timeout", 300)
         # 고빈도 배치(필터·분류·검증·기브리핑판정·통합가드) 백엔드:
         # "openai"(종량 과금) | "claude"(정액 구독). OpenAI는 토큰당 실지출이고

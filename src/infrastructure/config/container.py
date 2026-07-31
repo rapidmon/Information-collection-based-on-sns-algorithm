@@ -74,6 +74,8 @@ class Container:
             config=app_config.processing,
             model_filter=app_config.processing.claude_model_filter,
             model_process=app_config.processing.claude_model_process,
+            model_dedup=app_config.processing.claude_model_dedup,
+            model_consolidate=app_config.processing.claude_model_consolidate,
             timeout=app_config.processing.claude_timeout,
             oauth_token=settings.claude_code_oauth_token or None,
         )
