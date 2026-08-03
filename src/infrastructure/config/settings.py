@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import yaml
 from pydantic_settings import BaseSettings
+
+logger = logging.getLogger(__name__)
 
 
 # ──────────────────────────────────────────
@@ -150,6 +153,72 @@ class BriefingConfig:
         # 병합 후(재산정) 점수 기준 하한 + 카테고리별 상한 (항목 과다 방지)
         self.min_importance: float = data.get("min_importance", 0.8)
         self.max_per_category: int = data.get("max_per_category", 8)
+        # ─ 생성 단계 슈퍼셋 상한 (발송단 개인화용) ─
+        # 수신자별 카테고리 한도가 기본 상한을 넘으면 생성 단계에서 그만큼
+        # 넉넉히 뽑아 저장해 둬야 발송 시 트리밍으로 개인화가 가능하다.
+        # AppConfig가 email.audiences를 읽어 apply_recipient_caps()로 채운다.
+        self.category_caps: dict[str, int] = {}
+        self._gen_max_default: int = self.max_per_category
+
+    def apply_recipient_caps(self, recipients: "list[EmailRecipient]") -> None:
+        """수신자 개인화 한도의 최대값을 생성 단계 상한에 반영."""
+        for r in recipients:
+            if r.max_per_category:
+                self._gen_max_default = max(self._gen_max_default, r.max_per_category)
+            for cat, n in r.category_limits.items():
+                self.category_caps[cat] = max(self.category_caps.get(cat, 0), n)
+
+    def cap_for(self, category: str) -> int:
+        """생성 단계에서 이 카테고리를 최대 몇 개까지 선별할지."""
+        return max(self._gen_max_default, self.category_caps.get(category, 0))
+
+
+# 수신자 개인화 한도(max_per_category·category_limits)의 허용 범위.
+# 하한 2: 카테고리를 사실상 꺼버리는 설정 방지 / 상한 10: 생성 슈퍼셋·작문
+# 토큰이 수신자 설정만으로 무한정 커지는 것 방지. 범위 밖 값은 경고 후 보정.
+RECIPIENT_LIMIT_MIN = 2
+RECIPIENT_LIMIT_MAX = 10
+
+
+class EmailRecipient:
+    """브리핑 수신자 1명.
+
+    YAML에서 문자열(주소만) 또는 dict로 정의한다:
+      - "a@b.com"                              # 기본 한도(briefing.max_per_category)
+      - email: "c@d.com"                       # 개인별 카테고리 한도 조정
+        max_per_category: 4                    # 기본 카테고리당 항목 수 override
+        category_limits: { Coding: 10 }        # 특정 카테고리만 별도 한도 (영문 키)
+    한도 값은 RECIPIENT_LIMIT_MIN~MAX(2~10) 범위로 보정된다.
+    """
+
+    def __init__(self, data: str | dict[str, Any]):
+        if isinstance(data, str):
+            self.email: str = data.strip()
+            self.max_per_category: int | None = None
+            self.category_limits: dict[str, int] = {}
+        else:
+            self.email = str(data.get("email", "")).strip()
+            mpc = data.get("max_per_category")
+            self.max_per_category = self._clamp("max_per_category", mpc) if mpc else None
+            self.category_limits = {
+                str(k): self._clamp(f"category_limits.{k}", v)
+                for k, v in (data.get("category_limits") or {}).items()
+            }
+
+    def _clamp(self, field: str, value: Any) -> int:
+        n = int(value)
+        clamped = max(RECIPIENT_LIMIT_MIN, min(RECIPIENT_LIMIT_MAX, n))
+        if clamped != n:
+            logger.warning(
+                f"email.audiences 수신자 {self.email}의 {field}={n}은 허용 범위"
+                f"({RECIPIENT_LIMIT_MIN}~{RECIPIENT_LIMIT_MAX}) 밖 — {clamped}로 보정"
+            )
+        return clamped
+
+    @property
+    def limits_key(self) -> tuple:
+        """같은 뷰(한도 조합)를 받는 수신자를 묶는 그룹 키."""
+        return (self.max_per_category, tuple(sorted(self.category_limits.items())))
 
 
 class EmailConfig:
@@ -158,11 +227,25 @@ class EmailConfig:
         self.to_addresses: list[str] = data.get("to_addresses", [])
         # 시스템 알림(로그인 오류·수집 실패 등) 수신자 — 브리핑 수신자와 별개
         self.alert_addresses: list[str] = data.get("alert_addresses", ["ehhwll@hanmail.net"])
-        # 독자층별 발송: {페르소나(=큐레이션 대상): [수신주소]}
-        self.audiences: dict[str, list[str]] = data.get("audiences", {}) or {}
+        # 독자층별 발송: {페르소나(=큐레이션 대상): [수신자]} — 항목은 str 또는 dict
+        self.audiences: dict[str, list[EmailRecipient]] = {
+            persona: [
+                r for r in (EmailRecipient(x) for x in (entries or [])) if r.email
+            ]
+            for persona, entries in (data.get("audiences", {}) or {}).items()
+        }
         self.curation_enabled: bool = data.get("curation", True)
         self.logo_path: str = data.get("logo_path", "Logo.png")
         self.subject_prefix: str = data.get("subject_prefix", "Morning Commit")
+
+    def briefing_targets(self) -> dict[str, list[EmailRecipient]]:
+        """발송 대상: 독자층 지정이 있으면 그룹별, 없으면 to_addresses 단일(중립)."""
+        if self.audiences:
+            return self.audiences
+        return {"": [EmailRecipient(a) for a in self.to_addresses]}
+
+    def iter_recipients(self) -> "list[EmailRecipient]":
+        return [r for rs in self.briefing_targets().values() for r in rs]
 
 
 class SlackConfig:
@@ -255,6 +338,20 @@ class AppConfig:
         self.email = EmailConfig(data.get("email", {}))
         self.slack = SlackConfig(data.get("slack", {}))
         self.web = WebConfig(data.get("web", {}))
+
+        # 수신자 개인화 한도(코딩 10개 등)를 생성 단계 슈퍼셋 상한에 반영.
+        # 생성 시 넉넉히 뽑아 저장하고, 발송 시 수신자별로 트리밍한다.
+        recipients = self.email.iter_recipients()
+        self.briefing.apply_recipient_caps(recipients)
+        # 카테고리 키 오타는 조용히 무시되므로 여기서 경고
+        valid_cats = {c.name for c in self.categories}
+        for r in recipients:
+            for cat in r.category_limits:
+                if valid_cats and cat not in valid_cats:
+                    logger.warning(
+                        f"email.audiences 수신자 {r.email}의 category_limits에 "
+                        f"알 수 없는 카테고리 키: {cat!r} (유효: {sorted(valid_cats)})"
+                    )
 
 
 def load_app_config(path: str = "config/settings.yaml") -> AppConfig:

@@ -19,6 +19,35 @@ from src.infrastructure.delivery.categories import CATEGORY_KO, VALID_BRIEFING_C
 CATEGORY_ORDER = list(VALID_BRIEFING_CATEGORIES)
 
 
+def trim_items_per_category(
+    items: list[BriefingItem],
+    default_max: int,
+    category_limits: dict[str, int] | None = None,
+) -> list[BriefingItem]:
+    """수신자별 카테고리 한도로 브리핑 항목을 트리밍.
+
+    저장된 브리핑은 전 수신자 요구치의 슈퍼셋(cap_for)으로 뽑혀 있으므로,
+    발송 시 각 수신자 뷰는 여기서 카테고리당 상한만큼 잘라낸다.
+    default_max=0은 무제한. category_limits에 있는 카테고리는 그 값이 우선.
+    """
+    limits = category_limits or {}
+    by_cat: dict[str, list[BriefingItem]] = defaultdict(list)
+    for it in items:
+        by_cat[it.category_name or "Other"].append(it)
+
+    out: list[BriefingItem] = []
+    ordered = CATEGORY_ORDER + [c for c in by_cat if c not in CATEGORY_ORDER]
+    for cat in ordered:
+        cat_items = sorted(
+            by_cat.get(cat, []), key=lambda x: x.importance_score or 0, reverse=True
+        )
+        n = limits.get(cat, default_max)
+        if n:
+            cat_items = cat_items[:n]
+        out.extend(cat_items)
+    return out
+
+
 def _safe_url(url: str) -> str:
     """http/https URL만 허용하고 속성값으로 이스케이프 (javascript: 등 스킴 차단)."""
     url = (url or "").strip()
@@ -98,8 +127,10 @@ class DefaultBriefingGenerator:
         """카테고리별 상대 점수로 브리핑 항목을 고른다.
 
         각 카테고리 안에서 importance_score >= min_importance인 항목만 남기고,
-        중요도순으로 max_per_category개까지 선택한다. 유즈케이스가 이 결과에만
-        LLM 작문(compose_topics)을 수행하도록 공개 메서드로 노출한다(멱등).
+        중요도순으로 카테고리별 상한(cap_for)까지 선택한다. 상한은 수신자
+        개인화 한도의 슈퍼셋이라 기본값(max_per_category)보다 클 수 있으며,
+        기본 뷰는 발송 시 trim_items_per_category로 다시 잘린다. 유즈케이스가
+        이 결과에만 LLM 작문(compose_topics)을 수행하도록 공개 메서드로 노출한다(멱등).
         """
         by_cat: dict[str, list[MergedTopic]] = defaultdict(list)
         for topic in topics:
@@ -118,13 +149,18 @@ class DefaultBriefingGenerator:
                 t for t in cat_topics
                 if (t.importance_score or 0) >= self._config.min_importance
             ]
-            if self._config.max_per_category:
-                cat_topics = cat_topics[: self._config.max_per_category]
+            cap = self._config.cap_for(cat)
+            if cap:
+                cat_topics = cat_topics[:cap]
             selected.extend(cat_topics)
 
         if self._config.max_items:
             selected = selected[: self._config.max_items]
         return selected
+
+    def render_text(self, briefing: Briefing) -> str:
+        """트리밍된 수신자 뷰의 플레인텍스트 대안 렌더 (발송 파이프라인용)."""
+        return self._render_text(briefing)
 
     def _render_text(self, briefing: Briefing) -> str:
         lines: list[str] = []

@@ -46,8 +46,9 @@ NON_VERIFIED_SOURCES = {"producthunt", "news"}
 RECENT_BRIEFINGS_FOR_DEDUP = 3
 
 # 기브리핑 사건 dedup의 카테고리별 판정 대상 상한.
-# 발행권(max_per_category=6)에 재정규화 승격 여지를 더한 값 — 발행 가능성이 없는
-# 하위 후보까지 판정에 넣으면 호출 수만 늘고 recall은 떨어진다.
+# 발행권(기본 6, 개인화 슈퍼셋 카테고리는 cap_for 기준 최대 10)에 재정규화 승격
+# 여지를 더한 값 — 발행 가능성이 없는 하위 후보까지 판정에 넣으면 호출 수만
+# 늘고 recall은 떨어진다.
 DEDUP_TOP_PER_CATEGORY = 15
 
 

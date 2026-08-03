@@ -180,15 +180,14 @@ class Container:
             feedback_repo=self.feedback_repo,
         )
 
-    async def send_curated_briefing(self, briefing) -> dict:
-        """독자층별 큐레이션 생성 → Morning Commit HTML 렌더 → 그룹별 발송."""
-        from src.domain.services.ai_processor import Curation, MergedTopic
+    @staticmethod
+    def _topics_from_items(items) -> list:
+        """브리핑 항목(수신자 뷰) → 큐레이션 입력용 MergedTopic 목록."""
+        from src.domain.services.ai_processor import MergedTopic
         from src.infrastructure.delivery.categories import VALID_BRIEFING_CATEGORIES
-        from src.infrastructure.delivery.email_renderer import render_email_html
 
-        ecfg = self.config.email
         topics = []
-        for it in briefing.items:
+        for it in items:
             if it.category_name not in VALID_BRIEFING_CATEGORIES:
                 continue
             # 구조화 불릿을 그대로 사용(재파싱 방지). 구버전 브리핑엔 없으므로 body에서 폴백.
@@ -201,6 +200,23 @@ class Container:
                 importance_score=it.importance_score or 0.5,
                 sources=[], source_urls=it.source_urls or [],
             ))
+        return topics
+
+    async def send_curated_briefing(self, briefing) -> dict:
+        """독자층별 큐레이션 생성 → Morning Commit HTML 렌더 → 그룹별 발송.
+
+        저장된 브리핑은 전 수신자 요구치의 슈퍼셋(예: 코딩 10개)이고, 각
+        수신자 뷰는 발송 직전 카테고리 한도로 트리밍한다. 같은 페르소나라도
+        개인별 한도(category_limits)가 다르면 별도 뷰·큐레이션으로 발송한다.
+        """
+        from dataclasses import replace
+
+        from src.domain.services.ai_processor import Curation
+        from src.infrastructure.delivery.briefing_builder import trim_items_per_category
+        from src.infrastructure.delivery.email_renderer import render_email_html
+
+        ecfg = self.config.email
+        bcfg = self.config.briefing
 
         d = briefing.period_end or briefing.generated_at
         # Firestore는 datetime을 UTC로 저장/복원한다. 08:00 KST는 전날 23:00 UTC라
@@ -214,20 +230,36 @@ class Container:
         subject = f"[{ecfg.subject_prefix}] {date_str}"
 
         # 독자층 지정이 있으면 그룹별, 없으면 to_addresses로 단일(중립) 발송
-        targets = ecfg.audiences if ecfg.audiences else {"": ecfg.to_addresses}
         results: dict = {}
-        for persona, addrs in targets.items():
-            if not addrs:
+        for persona, recipients in ecfg.briefing_targets().items():
+            if not recipients:
                 continue
-            if persona and ecfg.curation_enabled:
-                curation = await self.ai_processor.generate_curation(topics, persona)
-            else:
-                curation = Curation(title="", paragraphs=[], kick="", categories={})
-            html = render_email_html(briefing, curation, "cid:logo", date_str)
-            ok = await self.notifier.send_html(
-                subject, html, briefing.content_text, addrs, ecfg.logo_path
-            )
-            results[persona or "default"] = {"sent": ok, "recipients": len(addrs)}
+            # 같은 한도 조합(뷰) 수신자끼리 묶어 큐레이션·렌더를 1회만 수행
+            groups: dict[tuple, list] = {}
+            for r in recipients:
+                groups.setdefault(r.limits_key, []).append(r)
+            for (mpc, limits), group in groups.items():
+                addrs = [r.email for r in group]
+                category_limits = dict(limits)
+                view_items = trim_items_per_category(
+                    briefing.items, mpc or bcfg.max_per_category, category_limits
+                )
+                view = replace(briefing, items=view_items, total_items=len(view_items))
+                if persona and ecfg.curation_enabled:
+                    curation = await self.ai_processor.generate_curation(
+                        self._topics_from_items(view_items), persona
+                    )
+                else:
+                    curation = Curation(title="", paragraphs=[], kick="", categories={})
+                html = render_email_html(view, curation, "cid:logo", date_str)
+                text = self.briefing_generator.render_text(view)
+                ok = await self.notifier.send_html(
+                    subject, html, text, addrs, ecfg.logo_path
+                )
+                label = persona or "default"
+                if mpc or category_limits:
+                    label = f"{label} (custom: {', '.join(addrs)})"
+                results[label] = {"sent": ok, "recipients": len(addrs)}
 
         # 발송 성공 그룹이 하나라도 있으면 발송 완료 마킹 (대시보드 '이메일 전송됨' 표시)
         if any(r.get("sent") for r in results.values()) and briefing.id:
@@ -239,9 +271,16 @@ class Container:
                 results["email_sent_mark_error"] = str(e)
 
         # 슬랙 게시 — 이메일과 독립적으로 시도 (실패해도 이메일 결과에 영향 없음)
+        # 저장 브리핑은 개인화 슈퍼셋이므로 슬랙은 기본 한도 뷰로 트리밍해 게시
         if self.slack_notifier.is_configured:
             try:
-                results["slack"] = await self.slack_notifier.send_briefing(briefing, date_str)
+                slack_items = trim_items_per_category(
+                    briefing.items, bcfg.max_per_category
+                )
+                slack_view = replace(
+                    briefing, items=slack_items, total_items=len(slack_items)
+                )
+                results["slack"] = await self.slack_notifier.send_briefing(slack_view, date_str)
             except Exception as e:
                 results["slack"] = {"sent": False, "error": str(e)}
         return results
