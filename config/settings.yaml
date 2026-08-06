@@ -159,7 +159,7 @@ slack:
   alert_user_id: "U04HPLC134G"           # 예: "U0123ABCDEF". 비우면 DM 알림 꺼짐
 
   # ─ 투표 마감 → 1위 항목 카드뉴스 타이틀 게시 ─
-  vote_close_time: "12:00"    # 집계 실행 시각 (HH:MM)
+  vote_close_time: "11:00"    # 집계 실행 시각 (HH:MM)
   vote_days: "mon-fri"        # 집계 실행 요일 (주말은 투표 없음 — @멘션으로 수동 처리)
   winner_websearch: false     # 프롬프트가 '입력된 정보 안에서만' 조건이라 웹검색 불필요
   # 1위 항목에 돌릴 프롬프트. ★비워두면 투표 집계 기능 전체가 꺼짐★
