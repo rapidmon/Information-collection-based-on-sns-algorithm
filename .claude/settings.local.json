@@ -220,7 +220,26 @@
       "PowerShell(& \"C:\\\\Users\\\\DONGA\\\\Desktop\\\\Information-collection-based-on-sns-algorithm\\\\.venv\\\\Scripts\\\\python.exe\" -m pytest tests/test_processing -q 2>$null)",
       "PowerShell(& \"C:\\\\Users\\\\DONGA\\\\Desktop\\\\Information-collection-based-on-sns-algorithm\\\\.venv\\\\Scripts\\\\python.exe\" -m pytest tests -q 2>$null)",
       "PowerShell(& \"C:\\\\Users\\\\DONGA\\\\Desktop\\\\Information-collection-based-on-sns-algorithm\\\\.venv\\\\Scripts\\\\python.exe\" \"C:\\\\Users\\\\DONGA\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-DONGA-Desktop-Information-collection-based-on-sns-algorithm\\\\e0d5fc10-4d1b-4319-be32-f7622e79be75\\\\scratchpad\\\\smoke_usage_e2e.py\")",
-      "PowerShell(Copy-Item *)"
+      "PowerShell(Copy-Item *)",
+      "PowerShell(tasklist /FI \"IMAGENAME eq python.exe\" /FO TABLE | Select-Object -First 6; \\(Get-Item logs\\\\app.log\\).Length; Get-Content logs\\\\app.log -Tail 5)",
+      "PowerShell(& .venv\\\\Scripts\\\\python.exe \"C:\\\\Users\\\\DONGA\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-DONGA-Desktop-Information-collection-based-on-sns-algorithm\\\\e0d5fc10-4d1b-4319-be32-f7622e79be75\\\\scratchpad\\\\progress_report.py\")",
+      "PowerShell(& .venv\\\\Scripts\\\\python.exe -c \"import sys; sys.stdout.reconfigure\\(encoding='utf-8'\\); lines=open\\(r'logs\\\\app.log',encoding='utf-8',errors='ignore'\\).readlines\\(\\); start=max\\(i for i,l in enumerate\\(lines\\) if 'ClaudeCodeProcessor' in l and '초기화' in l\\); [print\\(l.strip\\(\\)[:150]\\) for l in lines[start:] if '[usage]' in l]\")",
+      "PowerShell(& .venv\\\\Scripts\\\\python.exe -m pytest tests -q 2>$null)",
+      "Bash(awk '$1\" \"$2 >= \"2026-07-30 16:00\"')",
+      "Bash(.venv/Scripts/python.exe *)",
+      "Bash(./.venv/Scripts/python -m pytest tests/test_briefing/test_recipient_limits.py -q)",
+      "Bash(./.venv/Scripts/python -m pytest tests -q)",
+      "Bash(./.venv/Scripts/python -c ' *)",
+      "Bash(./.venv/Scripts/python -m pytest tests/test_processing/test_coverage_chunking.py -q)",
+      "Bash(./.venv/Scripts/python -m py_compile src/infrastructure/config/settings.py src/infrastructure/config/container.py src/infrastructure/delivery/briefing_builder.py src/application/use_cases/generate_briefing.py)",
+      "Bash(./.venv/Scripts/python -m pytest tests/test_briefing -q)",
+      "Bash(./.venv/Scripts/python -X utf8 \"C:\\\\Users\\\\DONGA\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-DONGA-Desktop-Information-collection-based-on-sns-algorithm\\\\3ead122a-fcb2-4136-ae95-0a1c903dac17\\\\scratchpad\\\\send_once_taeyeon.py\")",
+      "PowerShell(Get-CimInstance *)",
+      "PowerShell(Get-Content *)",
+      "PowerShell(Get-WinEvent *)",
+      "PowerShell(try { Get-WinEvent -FilterHashtable @{LogName='System'; StartTime=\\(Get-Date '2026-08-03 15:00'\\); EndTime=\\(Get-Date '2026-08-03 16:30'\\)} -ErrorAction Stop | Where-Object { $_.Id -in 1074,6005,6006,6008,41,42,107,109,506,507 } | Select-Object TimeCreated, Id, ProviderName, @{n='Msg';e={\\($_.Message -split \"`n\"\\)[0]}} | Sort-Object TimeCreated | Format-Table -AutoSize -Wrap } catch { $_.Exception.Message })",
+      "PowerShell(\\(Get-CimInstance Win32_OperatingSystem\\).LastBootUpTime; echo ---; try { Get-WinEvent -FilterHashtable @{LogName='System'; ProviderName='Microsoft-Windows-Kernel-Power','Microsoft-Windows-Kernel-General','USER32','EventLog','Microsoft-Windows-Power-Troubleshooter'; StartTime=\\(Get-Date '2026-08-03 15:00'\\); EndTime=\\(Get-Date '2026-08-04 11:00'\\)} -ErrorAction Stop | Select-Object TimeCreated, Id, ProviderName | Sort-Object TimeCreated | Format-Table -AutoSize | Out-String -Width 200 } catch { $_.Exception.Message })",
+      "Bash(awk '/2026-08-04 11:13:31/,0' logs/app.log)"
     ],
     "disallow": [
       "Bash(git push)"
