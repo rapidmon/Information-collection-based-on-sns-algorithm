@@ -13,6 +13,8 @@ data/backups/
 
 # Logs
 logs/*.log
+# 워치독 기동 유예 마커 (런타임 상태)
+logs/.watchdog_*
 
 # Python
 __pycache__/
