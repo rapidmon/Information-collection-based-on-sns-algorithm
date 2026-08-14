@@ -134,7 +134,10 @@ follow:
   max_attempts: 3          # 실패 계정 재시도 상한 (무한 재시도 방지)
   delay_min: 5.0           # 팔로우 사이 최소 대기(초) — 좋아요보다 길게
   delay_max: 12.0
-  platforms: ["twitter"]   # 트위터만 (threads/linkedin은 셀렉터 미검증)
+  # linkedin 제외: 대상 본인 버튼은 이름 없는 "팔로우중"인데 추천 계정들은 이름이
+  # 붙은 "○○ 팔로우"라, 이름으로 겨냥하면 엉뚱한 계정만 골라 팔로우한다(실측).
+  # 개인 프로필(/in/)은 본인 팔로우 버튼 자체가 없고 '연결'이 기본이라 동작이 다르다.
+  platforms: ["twitter", "threads"]
 
 briefing:
   daily_time: "08:00"

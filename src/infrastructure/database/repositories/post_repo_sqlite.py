@@ -461,7 +461,8 @@ class PostRepositorySQLite:
             {
                 "author_url": row["author_url"],
                 "author": row["author"],
-                "screen_name": (row["author_url"] or "").rstrip("/").rsplit("/", 1)[-1],
+                # threads는 .../@handle 형태라 @를 떼야 프로필 URL을 다시 만들 수 있다
+                "screen_name": (row["author_url"] or "").rstrip("/").rsplit("/", 1)[-1].lstrip("@"),
                 "like_count": row["like_count"],
             }
             for row in cursor.fetchall()

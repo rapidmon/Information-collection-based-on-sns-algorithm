@@ -22,6 +22,18 @@ from src.infrastructure.collectors.base_collector import BaseCdpCollector
 logger = logging.getLogger(__name__)
 
 
+def _normalize_profile_url(href: str) -> str:
+    """프로필 URL을 계정 식별자로 쓸 수 있게 정규화한다.
+
+    LinkedIn은 같은 계정에 로케일 접미사를 붙인 링크를 섞어 준다
+    (/in/daleseo/ 와 /in/daleseo/ko/). 정규화하지 않으면 같은 사람이
+    서로 다른 계정으로 집계된다.
+    """
+    href = (href or "").split("?")[0].split("#")[0]
+    m = re.search(r"(https://www\.linkedin\.com/(?:in|company)/[^/]+)/?", href)
+    return f"{m.group(1)}/" if m else href
+
+
 class LinkedInCollector(BaseCdpCollector):
     """LinkedIn 알고리즘 피드 수집기 (CDP 기반)."""
 
@@ -198,8 +210,8 @@ class LinkedInCollector(BaseCdpCollector):
             # 작성자 이름: "~님의 게시물에 대한 관리 메뉴 열기" 버튼의 aria-label에서 추출
             author = await self._extract_author(element)
 
-            # 작성자 프로필 URL
-            author_url = await self._extract_author_url(element)
+            # 작성자 프로필 URL (이름과 대조해 '작성자의' 링크만 채택)
+            author_url = await self._extract_author_url(element, author)
 
             # 포스트 URN 추출: 관리 메뉴 → embed 링크에서 실제 URN 획득
             post_urn = await self._extract_post_urn(element, page)
@@ -377,16 +389,42 @@ class LinkedInCollector(BaseCdpCollector):
 
         return ""
 
-    async def _extract_author_url(self, element) -> str:
-        """작성자 프로필 URL을 추출한다."""
-        # /in/username 또는 /company/name 링크 찾기
+    async def _extract_author_url(self, element, author: str = "") -> str:
+        """작성자 프로필 URL을 추출한다 — 링크 텍스트가 작성자 이름과 맞는 것만.
+
+        과거엔 게시물 안의 **첫 번째** /in/·/company/ 링크를 그대로 썼는데, 피드에서
+        그 자리는 보통 작성자가 아니라 소셜 프루프 헤더("○○님이 좋아합니다")나
+        멘션된 사람이다. 그 결과 한 URL에 서로 다른 작성자가 최대 56명까지 묶였고
+        (2026-08-14 실측: 오염 25/41), 계정 단위 기능(자동 팔로우)이 엉뚱한 사람을
+        가리키게 된다.
+
+        작성자 이름(_extract_author — 관리 메뉴 aria-label 기반이라 신뢰도 높음)과
+        링크 텍스트를 대조해 일치하는 링크만 채택한다. **못 찾으면 빈 문자열**이다 —
+        틀린 URL은 없는 것만 못하다(잘못된 계정을 팔로우하게 된다).
+        """
         links = await element.query_selector_all('a[href*="/in/"], a[href*="/company/"]')
+        if not links:
+            return ""
+
+        author = (author or "").strip()
+        if not author:
+            return ""
+
         for link in links:
-            href = await link.get_attribute("href") or ""
-            if "/in/" in href or "/company/" in href:
+            try:
+                text = (await link.inner_text()).strip().split("\n")[0].strip()
+            except Exception:
+                continue
+            if not text:
+                continue
+            # LinkedIn은 이름 뒤에 "· 1촌", 배지 등을 덧붙이므로 startswith 도 허용
+            if text == author or text.startswith(author):
+                href = await link.get_attribute("href") or ""
+                if not href:
+                    continue
                 if href.startswith("/"):
-                    return f"https://www.linkedin.com{href}"
-                return href
+                    href = f"https://www.linkedin.com{href}"
+                return _normalize_profile_url(href)
         return ""
 
     async def _extract_content(self, element) -> str:

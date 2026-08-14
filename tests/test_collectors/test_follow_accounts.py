@@ -161,3 +161,31 @@ async def test_disabled_does_nothing(repo):
 
     assert await FollowAccountsUseCase(repo, follower, cfg).execute() == {}
     assert follower.calls == []
+
+
+# ─── 플랫폼별 핸들·지원 범위 ───
+
+
+def test_threads_handle_strips_at(repo):
+    """threads author_url은 .../@handle 이라 @를 떼야 프로필 URL을 만들 수 있다."""
+    _add_liked(repo, "https://www.threads.net/@johnbrolins", 5, source="threads")
+
+    got = repo.get_follow_candidates(source="threads", min_likes=5, limit=10)
+
+    assert got[0]["screen_name"] == "johnbrolins"
+
+
+async def test_linkedin_is_not_followed():
+    """LinkedIn은 대상 본인 버튼과 추천 계정 버튼의 라벨 규칙이 반대라 미지원.
+
+    지원하면 정확히 엉뚱한 계정(Anthropic·Google…)만 골라 팔로우하게 된다.
+    """
+    from src.infrastructure.collectors.account_follower import SUPPORTED, CdpAccountFollower
+
+    assert "linkedin" not in SUPPORTED
+
+    follower = CdpAccountFollower(FollowConfig({"enabled": True}))
+    got = await follower.follow_accounts(
+        "linkedin", [{"author_url": "https://www.linkedin.com/in/x/", "screen_name": "x"}]
+    )
+    assert got == []
