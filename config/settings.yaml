@@ -126,6 +126,16 @@ like:
   delay_max: 5.0           # 좋아요 사이 최대 대기(초)
   platforms: ["twitter", "threads", "linkedin"]
 
+follow:
+  enabled: true            # 좋아요 누적 계정 자동 팔로우
+  dry_run: false           # false면 실제 팔로우 클릭
+  min_likes: 5             # 이 수 이상 좋아요한 계정을 팔로우 대상으로
+  max_per_run: 5           # 1회(플랫폼당) 최대 팔로우 수 — 몰아서 하면 X가 자동화로 판정
+  max_attempts: 3          # 실패 계정 재시도 상한 (무한 재시도 방지)
+  delay_min: 5.0           # 팔로우 사이 최소 대기(초) — 좋아요보다 길게
+  delay_max: 12.0
+  platforms: ["twitter"]   # 트위터만 (threads/linkedin은 셀렉터 미검증)
+
 briefing:
   daily_time: "08:00"
   max_items: 0

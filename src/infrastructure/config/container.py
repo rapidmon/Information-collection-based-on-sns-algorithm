@@ -12,12 +12,14 @@ from zoneinfo import ZoneInfo
 
 from src.domain.entities import Category
 from src.application.use_cases.collect_posts import CollectPostsUseCase
+from src.application.use_cases.follow_accounts import FollowAccountsUseCase
 from src.application.use_cases.generate_briefing import GenerateBriefingUseCase
 from src.application.use_cases.like_posts import LikePostsUseCase
 from src.application.use_cases.process_posts import ProcessPostsUseCase
 from src.infrastructure.ai.claude_code_processor import ClaudeCodeProcessor
 from src.infrastructure.ai.hybrid_processor import HybridAIProcessor
 from src.infrastructure.ai.openai_processor import OpenAIProcessor
+from src.infrastructure.collectors.account_follower import CdpAccountFollower
 from src.infrastructure.collectors.dcinside_collector import DCInsideCollector
 from src.infrastructure.collectors.kr36_collector import Kr36Collector
 from src.infrastructure.collectors.linkedin_collector import LinkedInCollector
@@ -92,6 +94,7 @@ class Container:
 
         # 자동 좋아요 (AI 처리 후 관련+중요 게시물에만)
         self.post_liker = CdpPostLiker(app_config.like)
+        self.account_follower = CdpAccountFollower(app_config.follow)
 
         # ─── Collectors ───
         self.collectors: dict[str, object] = {}
@@ -168,6 +171,13 @@ class Container:
             post_repo=self.post_repo,
             liker=self.post_liker,
             config=self.config.like,
+        )
+
+    def follow_accounts_use_case(self) -> FollowAccountsUseCase:
+        return FollowAccountsUseCase(
+            post_repo=self.post_repo,
+            follower=self.account_follower,
+            config=self.config.follow,
         )
 
     def generate_briefing_use_case(self) -> GenerateBriefingUseCase:

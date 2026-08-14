@@ -145,6 +145,25 @@ class LikeConfig:
         )
 
 
+class FollowConfig:
+    """자동 팔로우 설정. 좋아요가 누적된 계정을 팔로우해 알고리즘 피드를 유도한다.
+
+    max_per_run이 낮은 이유: X는 '짧은 시간에 몰아서'를 자동화로 판정한다.
+    총량이 같아도 사이클당 소수로 쪼개면 훨씬 안전하다.
+    """
+
+    def __init__(self, data: dict[str, Any]):
+        self.enabled: bool = data.get("enabled", False)
+        self.dry_run: bool = data.get("dry_run", True)
+        # 이 수 이상 좋아요한 계정을 팔로우 대상으로
+        self.min_likes: int = data.get("min_likes", 5)
+        self.max_per_run: int = data.get("max_per_run", 5)
+        self.max_attempts: int = data.get("max_attempts", 3)
+        self.delay_min: float = data.get("delay_min", 5.0)
+        self.delay_max: float = data.get("delay_max", 12.0)
+        self.platforms: list[str] = data.get("platforms", ["twitter"])
+
+
 class BriefingConfig:
     def __init__(self, data: dict[str, Any]):
         self.daily_time: str = data.get("daily_time", "06:30")
@@ -333,6 +352,7 @@ class AppConfig:
 
         self.processing = ProcessingConfig(data.get("processing", {}))
         self.like = LikeConfig(data.get("like", {}))
+        self.follow = FollowConfig(data.get("follow", {}))
         self.briefing = BriefingConfig(data.get("briefing", {}))
         self.scoring = ScoringConfig(data.get("scoring", {}))
         self.email = EmailConfig(data.get("email", {}))

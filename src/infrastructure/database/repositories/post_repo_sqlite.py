@@ -89,6 +89,21 @@ def init_sqlite_db() -> None:
     if "liked_at" not in existing_cols:
         cursor.execute("ALTER TABLE posts ADD COLUMN liked_at TIMESTAMP")
 
+    # 자동 팔로우 이력 — 계정당 1행. 재시도 폭주와 중복 팔로우를 막는 상태 저장소.
+    # status: followed(팔로우함) / already(이미 팔로우 중이었음) / failed(실패, attempts로 재시도 제한)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS followed_accounts (
+            author_url TEXT PRIMARY KEY,
+            source TEXT NOT NULL,
+            screen_name TEXT,
+            like_count INTEGER,
+            status TEXT NOT NULL,
+            attempts INTEGER NOT NULL DEFAULT 0,
+            followed_at TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    """)
+
     # 인덱스 생성 (성능 최적화)
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_collected_at ON posts(collected_at);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_source ON posts(source);")
@@ -411,6 +426,69 @@ class PostRepositorySQLite:
         )
         conn.commit()
         return cursor.rowcount
+
+    # ─── 자동 팔로우 ───
+
+    def get_follow_candidates(
+        self, source: str, min_likes: int, limit: int, max_attempts: int = 3
+    ) -> list[dict]:
+        """좋아요 누적이 임계값 이상인 계정을 팔로우 후보로 반환 (좋아요 많은 순).
+
+        author_url이 계정 식별자다 — 트위터는 2026-08 이전 수집분에 작성자가
+        비어 있어(스키마 변경 미추적) 집계에서 자연히 빠진다.
+        이미 처리된 계정(followed/already)과 재시도 한도를 넘긴 실패 계정은 제외한다.
+        """
+        conn = _get_db()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT p.author_url, MAX(p.author) AS author, COUNT(*) AS like_count
+            FROM posts p
+            LEFT JOIN followed_accounts f ON f.author_url = p.author_url
+            WHERE p.source = ?
+              AND p.liked_at IS NOT NULL
+              AND p.author_url IS NOT NULL AND p.author_url != ''
+              AND (f.author_url IS NULL
+                   OR (f.status = 'failed' AND f.attempts < ?))
+            GROUP BY p.author_url
+            HAVING COUNT(*) >= ?
+            ORDER BY like_count DESC
+            LIMIT ?
+            """,
+            (source, max_attempts, min_likes, limit),
+        )
+        return [
+            {
+                "author_url": row["author_url"],
+                "author": row["author"],
+                "screen_name": (row["author_url"] or "").rstrip("/").rsplit("/", 1)[-1],
+                "like_count": row["like_count"],
+            }
+            for row in cursor.fetchall()
+        ]
+
+    def record_follow(
+        self, author_url: str, source: str, screen_name: str, like_count: int, status: str
+    ) -> None:
+        """팔로우 시도 결과 기록. 실패는 attempts를 올려 무한 재시도를 막는다."""
+        conn = _get_db()
+        cursor = conn.cursor()
+        followed_at = datetime.utcnow().isoformat() if status in ("followed", "already") else None
+        cursor.execute(
+            """
+            INSERT INTO followed_accounts
+                (author_url, source, screen_name, like_count, status, attempts, followed_at)
+            VALUES (?, ?, ?, ?, ?, 1, ?)
+            ON CONFLICT(author_url) DO UPDATE SET
+                status=excluded.status,
+                like_count=excluded.like_count,
+                attempts=followed_accounts.attempts + 1,
+                followed_at=COALESCE(excluded.followed_at, followed_accounts.followed_at),
+                updated_at=CURRENT_TIMESTAMP
+            """,
+            (author_url, source, screen_name, like_count, status, followed_at),
+        )
+        conn.commit()
 
     def get_unprocessed(self, limit: int = 100) -> list[Post]:
         """AI 처리 안 된 게시물 조회 (summary가 None)."""

@@ -106,7 +106,40 @@ async def trigger_processing(request: Request):
                 stats = {**stats, "liked": like_stats}
         except Exception as e:
             stats = {**stats, "like_error": str(e)}
+        try:
+            follow_stats = await c.follow_accounts_use_case().execute()
+            if follow_stats:
+                stats = {**stats, "followed": follow_stats}
+        except Exception as e:
+            stats = {**stats, "follow_error": str(e)}
         return stats
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@router.post("/follow/trigger")
+async def trigger_follow(request: Request):
+    """수동 자동 팔로우 트리거 (좋아요 누적 계정)."""
+    c = _get_container(request)
+    try:
+        return await c.follow_accounts_use_case().execute()
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@router.get("/follow/candidates")
+async def follow_candidates(request: Request):
+    """현재 팔로우 후보(좋아요 누적 계정)를 조회만 한다 — 팔로우는 하지 않음."""
+    c = _get_container(request)
+    cfg = c.config.follow
+    try:
+        out = {}
+        for source in cfg.platforms:
+            out[source] = c.post_repo.get_follow_candidates(
+                source=source, min_likes=cfg.min_likes,
+                limit=50, max_attempts=cfg.max_attempts,
+            )
+        return {"min_likes": cfg.min_likes, "candidates": out}
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 

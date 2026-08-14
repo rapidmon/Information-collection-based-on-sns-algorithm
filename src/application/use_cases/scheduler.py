@@ -252,6 +252,15 @@ class Orchestrator:
         except Exception as e:
             logger.error(f"[scheduler] 자동 좋아요 오류: {e}")
 
+        # 좋아요가 누적된 계정 자동 팔로우 (좋아요 직후 — 방금 늘어난 집계를 바로 반영)
+        try:
+            follow_uc = self._c.follow_accounts_use_case()
+            follow_stats = await follow_uc.execute()
+            if follow_stats:
+                logger.info(f"[scheduler] 자동 팔로우: {follow_stats}")
+        except Exception as e:
+            logger.error(f"[scheduler] 자동 팔로우 오류: {e}")
+
     async def _run_daily_briefing(self) -> None:
         logger.info("[scheduler] 일일 브리핑 생성 시작")
         try:
