@@ -192,9 +192,14 @@ class TwitterCollector(BaseCdpCollector):
             if not tweet_id:
                 return None
 
-            user_legacy = user_results.get("legacy", {})
-            screen_name = user_legacy.get("screen_name", "")
-            display_name = user_legacy.get("name", screen_name)
+            # 작성자 식별. X가 유저 필드를 legacy → core 아래로 옮겼다(2026-08 확인:
+            # user_results.result.legacy 는 빈 dict가 되고 screen_name/name 이 result.core 로 이동).
+            # 구 경로만 읽던 탓에 author/author_url 이 전량 비고 URL도 익명형
+            # (x.com/i/web/status/…)으로 저장됐다. 스키마가 또 바뀔 수 있어 양쪽을 본다.
+            user_core = user_results.get("core") or {}
+            user_legacy = user_results.get("legacy") or {}
+            screen_name = user_core.get("screen_name") or user_legacy.get("screen_name", "")
+            display_name = user_core.get("name") or user_legacy.get("name") or screen_name
 
             full_text = legacy.get("full_text", "")
             if not full_text:
