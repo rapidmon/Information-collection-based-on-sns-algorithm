@@ -7,7 +7,9 @@ collection:
   twitter:
     enabled: true
     interval_minutes: 20
-    scroll_rounds: 5          # 필터 호출당 브리핑 산출 최저(0.14)라 감축. baseline은 여전히 충분
+    scroll_rounds: 8          # 7/06에 토큰 절감으로 8→5 했다가 복원(8/14) — 피드 밖 게시물이
+                              # 통째로 누락된다는 지적. 인터셉트의 48%가 이미 본 글이라 증분은
+                              # 선형이 아니다(신규 저장은 그보다 덜 는다).
     scroll_delay_min: 2.0
     scroll_delay_max: 4.0
     use_graphql_interception: true
