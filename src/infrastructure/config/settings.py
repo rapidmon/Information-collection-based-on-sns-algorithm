@@ -114,6 +114,19 @@ class ProcessingConfig:
             "claude_model_consolidate", "claude-haiku-4-5"
         )
         self.claude_timeout: int = data.get("claude_timeout", 300)
+        # Codex CLI(ChatGPT 구독) — OpenAI API를 대체하는 폴백/보조 백엔드.
+        # 빈 문자열이면 -m 을 넘기지 않아 codex 기본 모델을 쓴다(구독 등급에 맞춰 자동).
+        self.codex_model_filter: str = data.get("codex_model_filter", "")
+        self.codex_model_process: str = data.get("codex_model_process", "")
+        self.codex_timeout: int = data.get("codex_timeout", 600)
+        self.codex_model_dedup: str = data.get("codex_model_dedup", "")
+        self.codex_model_consolidate: str = data.get("codex_model_consolidate", "")
+        self.codex_effort_filter: str = data.get("codex_effort_filter", "low")
+        self.codex_effort_process: str = data.get("codex_effort_process", "medium")
+        self.codex_effort_dedup: str = data.get("codex_effort_dedup", "")
+        self.codex_effort_consolidate: str = data.get("codex_effort_consolidate", "")
+        # True면 Claude를 아예 쓰지 않는다(고정 경로 포함) — 단일 백엔드 품질 비교용.
+        self.codex_only: bool = data.get("codex_only", False)
         # 고빈도 배치(필터·분류·검증·기브리핑판정·통합가드) 백엔드:
         # "openai"(종량 과금) | "claude"(정액 구독). OpenAI는 토큰당 실지출이고
         # Claude CLI는 구독 한도를 쓴다 — 현금을 줄이려면 "claude"가 최선이나,

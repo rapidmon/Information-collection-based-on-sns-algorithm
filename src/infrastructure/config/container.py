@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -17,6 +18,7 @@ from src.application.use_cases.generate_briefing import GenerateBriefingUseCase
 from src.application.use_cases.like_posts import LikePostsUseCase
 from src.application.use_cases.process_posts import ProcessPostsUseCase
 from src.infrastructure.ai.claude_code_processor import ClaudeCodeProcessor
+from src.infrastructure.ai.codex_cli_processor import CodexCliProcessor
 from src.infrastructure.ai.hybrid_processor import HybridAIProcessor
 from src.infrastructure.ai.openai_processor import OpenAIProcessor
 from src.infrastructure.collectors.account_follower import CdpAccountFollower
@@ -38,6 +40,8 @@ from src.infrastructure.database.repositories.post_repo_sqlite import PostReposi
 from src.infrastructure.delivery.briefing_builder import DefaultBriefingGenerator
 from src.infrastructure.delivery.email_sender import EmailNotifier
 from src.infrastructure.delivery.slack_sender import SlackNotifier
+
+logger = logging.getLogger(__name__)
 
 
 class Container:
@@ -69,9 +73,19 @@ class Container:
         # AI 백엔드는 하이브리드: 고빈도 배치(필터·분류·검증 등)는 routine_backend
         # 설정으로 선택(현재 claude=정액 구독), 발행 작문·큐레이션은 Claude 고정.
         # 어느 쪽이든 백엔드 장애 시 반대편(OpenAI)으로 자동 폴백한다.
-        openai_processor = OpenAIProcessor(
-            api_key=settings.openai_api_key,
+        # 보조/폴백 백엔드는 Codex CLI(ChatGPT 구독) — OpenAI API 종량 과금을 대체한다.
+        # 웹검증(DuckDuckGo)은 OpenAIProcessor 구현을 그대로 상속해 쓴다.
+        fallback_processor = CodexCliProcessor(
             config=app_config.processing,
+            model_filter=app_config.processing.codex_model_filter,
+            model_process=app_config.processing.codex_model_process,
+            model_dedup=app_config.processing.codex_model_dedup,
+            model_consolidate=app_config.processing.codex_model_consolidate,
+            effort_filter=app_config.processing.codex_effort_filter,
+            effort_process=app_config.processing.codex_effort_process,
+            effort_dedup=app_config.processing.codex_effort_dedup,
+            effort_consolidate=app_config.processing.codex_effort_consolidate,
+            timeout=app_config.processing.codex_timeout,
         )
         claude_processor = ClaudeCodeProcessor(
             config=app_config.processing,
@@ -82,7 +96,7 @@ class Container:
             timeout=app_config.processing.claude_timeout,
             oauth_token=settings.claude_code_oauth_token or None,
         )
-        self.ai_processor = HybridAIProcessor(openai_processor, claude_processor)
+        self.ai_processor = HybridAIProcessor(fallback_processor, claude_processor)
         # 슬랙 투표 1위 심층 글 등 파이프라인 밖 자유 프롬프트 실행용 직접 참조
         self.claude_processor = claude_processor
 
@@ -388,14 +402,12 @@ class Container:
                     scfg.winner_prompt, w, posts_text, tally["date_str"]
                 )
                 body = f"🎯 *{_label(w)}*\n\n"
-                body += await self.claude_processor.run_freeform(
-                    prompt, websearch=scfg.winner_websearch
-                )
+                body += await self.run_freeform(prompt, websearch=scfg.winner_websearch)
                 if scfg.caption_prompt.strip():
                     caption_prompt = render_winner_prompt(
                         scfg.caption_prompt, w, posts_text, tally["date_str"]
                     )
-                    caption = await self.claude_processor.run_freeform(
+                    caption = await self.run_freeform(
                         caption_prompt, websearch=scfg.winner_websearch
                     )
                     body += f"\n\n──────────\n{caption}"
@@ -410,6 +422,23 @@ class Container:
             "no_votes": no_votes,
             "winners": results,
         }
+
+    async def run_freeform(self, prompt: str, websearch: bool = True) -> str:
+        """카드뉴스 등 파이프라인 밖 자유 프롬프트 — 백엔드 선택 + 폴백.
+
+        과거엔 claude_processor.run_freeform 을 직접 불러 **폴백이 없었다**.
+        Claude CLI가 죽으면(한도 소진·npm 스텁 등) 카드뉴스만 통째로 실패했다
+        (2026-07-27, 08-12, 08-20 실사고). 이제 배치 경로와 같은 안전망을 둔다.
+        codex_only 모드에서는 Claude를 아예 건너뛴다.
+        """
+        codex = self.ai_processor._fallback
+        if getattr(self.config.processing, "codex_only", False):
+            return await codex.run_freeform(prompt, websearch=websearch)
+        try:
+            return await self.claude_processor.run_freeform(prompt, websearch=websearch)
+        except Exception as e:
+            logger.warning(f"Claude freeform 실패, 폴백(Codex) 실행: {e}")
+            return await codex.run_freeform(prompt, websearch=websearch)
 
     async def run_slack_mention(self, text: str, channel: str, thread_ts: str) -> None:
         """@멘션으로 붙여넣은 게시물에 winner_prompt(+캡션)를 돌려 스레드로 답장.
@@ -443,12 +472,12 @@ class Container:
             posts_text = text  # 붙여넣은 원문 전체를 원본 게시물로 전달
             date_str = datetime.now(ZoneInfo(self.config.timezone)).strftime("%Y. %m. %d")
 
-            body = await self.claude_processor.run_freeform(
+            body = await self.run_freeform(
                 render_winner_prompt(scfg.winner_prompt, item, posts_text, date_str),
                 websearch=scfg.winner_websearch,
             )
             if scfg.caption_prompt.strip():
-                caption = await self.claude_processor.run_freeform(
+                caption = await self.run_freeform(
                     render_winner_prompt(scfg.caption_prompt, item, posts_text, date_str),
                     websearch=scfg.winner_websearch,
                 )

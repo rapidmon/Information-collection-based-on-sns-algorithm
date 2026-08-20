@@ -108,6 +108,28 @@ processing:
   claude_model_dedup: "claude-opus-4-8"          # 기브리핑 판정 (find_covered_topics)
   claude_model_consolidate: "claude-haiku-4-5"   # 발행 확정분 동일 사건 병합 가드
   claude_timeout: 600
+  # ─ Codex CLI(ChatGPT 구독) — OpenAI API(종량 과금)를 2026-08-20 대체 ─
+  # codex_only: true 면 Claude를 전혀 쓰지 않는다(작문·큐레이션·티어 고정 경로 포함).
+  # 2026-08-31까지 품질 비교용으로 켜 둔다. 비교가 끝나면 false로 되돌릴 것.
+  codex_only: true
+  # ⚠️ 이 ChatGPT 계정에서 codex가 받아주는 모델은 gpt-5.5 하나뿐이다(2026-08-20 실측:
+  #   gpt-5.5-codex·gpt-5-codex·gpt-5.1/5.2·*-mini 전부 "not supported ... with a ChatGPT
+  #   account"). 그래서 티어 구분은 모델이 아니라 **추론 강도**로 한다.
+  codex_model_filter: "gpt-5.5"
+  codex_model_process: "gpt-5.5"
+  codex_model_dedup: "gpt-5.5"
+  codex_model_consolidate: "gpt-5.5"
+  # 추론 강도(none/low/medium/high) — 티어별.
+  #  filter      : 중요도 채점·웹검증 판정. 품질 민감이라 low.
+  #                (물량 지배 단계인 filter_and_summarize 는 lean=True 라 이 값과 무관하게 none)
+  #  process     : 발행 문장 작문·큐레이션 — 브리핑 품질 직결.
+  #  dedup       : 기브리핑 판정. 7월 사고(recall/precision 붕괴) 지점이라 한 단계 올린다.
+  #  consolidate : 발행 확정분 병합 가드. 하루 1회 짧은 판정.
+  codex_effort_filter: "low"
+  codex_effort_process: "medium"
+  codex_effort_dedup: "high"
+  codex_effort_consolidate: "low"
+  codex_timeout: 600
   # 고빈도 배치(필터·분류·검증·기브리핑판정·통합가드) 백엔드:
   #   openai(종량 과금) | claude(정액 구독)
   # claude면 OpenAI 청구액이 ~0으로 가지만 구독 한도(대화형 작업과 공유)를 쓴다.
@@ -115,8 +137,10 @@ processing:
   # 품질 민감 단계(중요도 채점·기브리핑 판정·티어)는 추론 유지. 오버헤드는 거의 전부 캐시.
   # ⚠️ 전환 후 최소 1주일 rate limit 체감 관찰. 백엔드 장애 시 openai 자동 폴백.
   routine_backend: "claude"
-  model_filter: "gpt-5-mini"          # OpenAI 폴백: 필터/분류/검증 (추론 모델)
-  model_process: "gpt-5-mini"         # OpenAI 폴백: 작문·큐레이션 (Claude 실패 시)
+  # 아래 두 값은 이제 실제 모델 선택에 쓰이지 않는다(Codex는 tier로 고른다).
+  # 프롬프트 로그·호환을 위해 남겨둔 이름표다.
+  model_filter: "gpt-5-mini"
+  model_process: "gpt-5-mini"
   batch_size_filter: 40
   batch_size_categorize: 40
   dedup_chunk_size: 30         # 미사용 (결정적 클러스터링은 청크 개념 없음)
