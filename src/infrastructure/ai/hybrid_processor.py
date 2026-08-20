@@ -7,7 +7,7 @@ import logging
 from src.domain.entities import Post
 from src.domain.services.ai_processor import MergedTopic
 from src.infrastructure.ai.claude_code_processor import ClaudeCodeProcessor
-from src.infrastructure.ai.openai_processor import BaseLLMProcessor
+from src.infrastructure.ai.llm_processor import BaseLLMProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +52,7 @@ class HybridAIProcessor:
     def _routine_on_claude(self) -> bool:
         if self._codex_only():
             return False
-        return getattr(self._config, "routine_backend", "openai") == "claude"
+        return getattr(self._config, "routine_backend", "codex") == "claude"
 
     async def _route(self, method: str, *args, **kwargs):
         """고빈도 배치 공통 라우팅 — claude 우선(설정 시), 실패하면 폴백으로 완주.

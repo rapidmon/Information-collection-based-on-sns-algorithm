@@ -28,7 +28,6 @@ class SnsCredentials:
 # 환경변수 기반 시크릿 설정 (.env)
 # ──────────────────────────────────────────
 class Settings(BaseSettings):
-    openai_api_key: str = ""
     # claude_code 백엔드를 다른 머신/서비스 컨텍스트에서 쓸 때만 필요(선택).
     # 본인 머신에서 claude 로그인이 되어 있으면 비워둬도 됨.
     claude_code_oauth_token: str = ""
@@ -98,12 +97,12 @@ class CategoryConfig:
 
 
 class ProcessingConfig:
-    """AI 백엔드는 하이브리드 고정 — OpenAI(고빈도 배치) + Claude(발행 작문·큐레이션)."""
+    """Codex CLI와 Claude CLI를 조합하는 AI 처리 설정."""
 
     def __init__(self, data: dict[str, Any]):
-        # OpenAI 모델: 필터/분류/검증(model_filter), 작문 폴백(model_process)
-        self.model_filter: str = data.get("model_filter", "gpt-4o-mini")
-        self.model_process: str = data.get("model_process", "gpt-4o")
+        # 공용 처리 파이프라인의 호출 의도 표식. 실제 CLI 모델은 tier별 설정으로 고른다.
+        self.model_filter: str = data.get("model_filter", "filter")
+        self.model_process: str = data.get("model_process", "process")
         # Claude 모델 (발행 작문·큐레이션용)
         self.claude_model_filter: str = data.get("claude_model_filter", "claude-haiku-4-5")
         self.claude_model_process: str = data.get("claude_model_process", "claude-sonnet-4-6")
@@ -114,7 +113,7 @@ class ProcessingConfig:
             "claude_model_consolidate", "claude-haiku-4-5"
         )
         self.claude_timeout: int = data.get("claude_timeout", 300)
-        # Codex CLI(ChatGPT 구독) — OpenAI API를 대체하는 폴백/보조 백엔드.
+        # Codex CLI(ChatGPT 구독) 폴백/보조 백엔드.
         # 빈 문자열이면 -m 을 넘기지 않아 codex 기본 모델을 쓴다(구독 등급에 맞춰 자동).
         self.codex_model_filter: str = data.get("codex_model_filter", "")
         self.codex_model_process: str = data.get("codex_model_process", "")
@@ -128,13 +127,11 @@ class ProcessingConfig:
         # True면 Claude를 아예 쓰지 않는다(고정 경로 포함) — 단일 백엔드 품질 비교용.
         self.codex_only: bool = data.get("codex_only", False)
         # 고빈도 배치(필터·분류·검증·기브리핑판정·통합가드) 백엔드:
-        # "openai"(종량 과금) | "claude"(정액 구독). OpenAI는 토큰당 실지출이고
-        # Claude CLI는 구독 한도를 쓴다 — 현금을 줄이려면 "claude"가 최선이나,
-        # 무인 파이프라인이 대화형 작업과 한도를 공유하므로 전환 후 최소 1주일은
-        # rate limit 체감을 관찰할 것. 백엔드 장애 시 OpenAI로 자동 폴백.
+        # "codex" | "claude". 두 백엔드 모두 CLI 구독 한도를 쓴다.
+        # Claude 장애 시 Codex로 자동 폴백한다.
         # (filter_backend는 필터만 가리키던 구 키 — 호환용으로 계속 읽는다)
         self.routine_backend: str = data.get(
-            "routine_backend", data.get("filter_backend", "openai")
+            "routine_backend", data.get("filter_backend", "codex")
         )
         self.batch_size_filter: int = data.get("batch_size_filter", 20)
         self.batch_size_categorize: int = data.get("batch_size_categorize", 20)

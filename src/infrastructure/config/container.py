@@ -20,7 +20,6 @@ from src.application.use_cases.process_posts import ProcessPostsUseCase
 from src.infrastructure.ai.claude_code_processor import ClaudeCodeProcessor
 from src.infrastructure.ai.codex_cli_processor import CodexCliProcessor
 from src.infrastructure.ai.hybrid_processor import HybridAIProcessor
-from src.infrastructure.ai.openai_processor import OpenAIProcessor
 from src.infrastructure.collectors.account_follower import CdpAccountFollower
 from src.infrastructure.collectors.dcinside_collector import DCInsideCollector
 from src.infrastructure.collectors.donga_series_collector import DongaSeriesCollector
@@ -72,9 +71,8 @@ class Container:
         # ─── Infrastructure Services ───
         # AI 백엔드는 하이브리드: 고빈도 배치(필터·분류·검증 등)는 routine_backend
         # 설정으로 선택(현재 claude=정액 구독), 발행 작문·큐레이션은 Claude 고정.
-        # 어느 쪽이든 백엔드 장애 시 반대편(OpenAI)으로 자동 폴백한다.
-        # 보조/폴백 백엔드는 Codex CLI(ChatGPT 구독) — OpenAI API 종량 과금을 대체한다.
-        # 웹검증(DuckDuckGo)은 OpenAIProcessor 구현을 그대로 상속해 쓴다.
+        # Claude 장애 시 Codex CLI로 폴백한다. 두 경로 모두 구독 인증을 사용한다.
+        # Codex 웹검증은 공용 DuckDuckGo 검증 파이프라인을 상속한다.
         fallback_processor = CodexCliProcessor(
             config=app_config.processing,
             model_filter=app_config.processing.codex_model_filter,

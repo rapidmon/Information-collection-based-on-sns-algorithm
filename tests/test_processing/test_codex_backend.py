@@ -1,6 +1,6 @@
 """Codex CLI 백엔드 — 커맨드 구성·오류 전파·티어 매핑 회귀 방지.
 
-폴백이 OpenAI API(종량 과금)에서 Codex CLI(ChatGPT 구독)로 바뀌었다(2026-08-20).
+폴백이 기존 종량 API에서 Codex CLI(ChatGPT 구독)로 바뀌었다(2026-08-20).
 장애가 LLMBackendError로 전파돼야 hybrid의 상호 폴백이 실제로 작동한다.
 """
 
@@ -11,7 +11,7 @@ import subprocess
 import pytest
 
 from src.infrastructure.ai.codex_cli_processor import CodexCliProcessor
-from src.infrastructure.ai.openai_processor import LLMBackendError
+from src.infrastructure.ai.llm_processor import LLMBackendError
 from src.infrastructure.config.settings import ProcessingConfig
 
 
@@ -73,6 +73,41 @@ def test_tier_selects_model(monkeypatch, tier, expected):
     _proc(model_filter="F", model_process="P")._call_api("무시되는-openai-모델명", "p", tier=tier)
 
     assert run.cmd[run.cmd.index("-m") + 1] == expected
+
+
+@pytest.mark.parametrize(
+    "tier,expected",
+    [
+        ("filter", "gpt-5.6-luna"),
+        ("process", "gpt-5.6-sol"),
+        ("dedup", "gpt-5.6-sol"),
+        ("consolidate", "gpt-5.6-terra"),
+    ],
+)
+def test_configured_tier_models_reach_codex_cli(monkeypatch, tier, expected):
+    run = _Run()
+    monkeypatch.setattr(subprocess, "run", run)
+
+    _proc(
+        model_filter="gpt-5.6-luna",
+        model_process="gpt-5.6-sol",
+        model_dedup="gpt-5.6-sol",
+        model_consolidate="gpt-5.6-terra",
+    )._call_api("compat", "p", tier=tier)
+
+    assert run.cmd[run.cmd.index("-m") + 1] == expected
+
+
+def test_lean_filter_uses_supported_low_effort(monkeypatch):
+    run = _Run()
+    monkeypatch.setattr(subprocess, "run", run)
+
+    _proc(model_filter="gpt-5.6-luna", effort_filter="low")._call_api(
+        "compat", "p", lean=True
+    )
+
+    effort = run.cmd[run.cmd.index("-c") + 1]
+    assert effort == "model_reasoning_effort=low"
 
 
 def test_no_model_flag_when_unset(monkeypatch):

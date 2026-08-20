@@ -6,9 +6,9 @@ import json
 from types import SimpleNamespace
 
 from src.domain.services.ai_processor import MergedTopic
-from src.infrastructure.ai.openai_processor import (
+from src.infrastructure.ai.llm_processor import (
+    BaseLLMProcessor,
     COVERAGE_DEDUP_CHUNK_SIZE,
-    OpenAIProcessor,
 )
 
 
@@ -19,11 +19,13 @@ def _topic(headline: str) -> MergedTopic:
     )
 
 
-def _proc() -> OpenAIProcessor:
-    return OpenAIProcessor(
-        api_key="test-key",
-        config=SimpleNamespace(model_filter="test-model", model_process="test-model"),
-    )
+class _TestProcessor(BaseLLMProcessor):
+    def __init__(self):
+        self._config = SimpleNamespace(model_filter="filter", model_process="process")
+
+
+def _proc() -> BaseLLMProcessor:
+    return _TestProcessor()
 
 
 async def test_chunks_and_keeps_global_indexes(monkeypatch):
@@ -31,7 +33,7 @@ async def test_chunks_and_keeps_global_indexes(monkeypatch):
     topics = [_topic(f"사건 {i}") for i in range(COVERAGE_DEDUP_CHUNK_SIZE + 10)]
     calls: list[str] = []
 
-    def fake_call(model, prompt, max_tokens=4096):
+    def fake_call(model, prompt, max_tokens=4096, **kwargs):
         calls.append(prompt)
         if len(calls) == 1:
             return json.dumps([
@@ -60,7 +62,7 @@ async def test_chunk_failure_skips_only_that_chunk(monkeypatch):
     topics = [_topic(f"사건 {i}") for i in range(COVERAGE_DEDUP_CHUNK_SIZE + 5)]
     calls: list[int] = []
 
-    def fake_call(model, prompt, max_tokens=4096):
+    def fake_call(model, prompt, max_tokens=4096, **kwargs):
         calls.append(1)
         if len(calls) == 1:
             raise RuntimeError("llm down")
@@ -97,7 +99,7 @@ async def test_ungrounded_verdicts_discarded(monkeypatch):
     topics = [_topic(f"사건 {i}") for i in range(4)]
     recent = ["[AI] Alphabet Q2 2026 실적: 매출 1198억 달러·Google Cloud 248억 달러"]
 
-    def fake_call(model, prompt, max_tokens=4096):
+    def fake_call(model, prompt, max_tokens=4096, **kwargs):
         return json.dumps([
             # 실존 항목을 그대로 복사 → 유효
             {"index": 0, "duplicate": True, "matched": recent[0], "reason": "r"},
@@ -120,7 +122,7 @@ async def test_short_matched_substring_not_grounding(monkeypatch):
     topics = [_topic("사건 0")]
     recent = ["[AI] Alphabet Q2 2026 실적: 매출 1198억 달러·Google Cloud 248억 달러"]
 
-    def fake_call(model, prompt, max_tokens=4096):
+    def fake_call(model, prompt, max_tokens=4096, **kwargs):
         return json.dumps([
             {"index": 0, "duplicate": True, "matched": "Alphabet", "reason": "짧은 근거"},
         ])

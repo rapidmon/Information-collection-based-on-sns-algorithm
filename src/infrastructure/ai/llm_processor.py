@@ -1,8 +1,4 @@
-"""OpenAI API 기반 AI 프로세서 구현.
-
-도메인 AIProcessor 인터페이스를 구현한다.
-GPT-4o-mini로 필터링, GPT-4o로 요약/분류/통합 — 비용 최적화.
-"""
+"""CLI LLM 백엔드 공용 처리 파이프라인과 DuckDuckGo 웹 검증."""
 
 from __future__ import annotations
 
@@ -13,7 +9,6 @@ import re
 from typing import Any
 
 from bs4 import BeautifulSoup
-from openai import OpenAI
 
 from src.domain.entities import Post
 from duckduckgo_search import DDGS
@@ -42,7 +37,6 @@ from src.infrastructure.ai.prompts import (
 )
 from src.infrastructure.ai.topic_merger import TopicMerger
 from src.infrastructure.collectors.http import fetch_text
-from src.infrastructure.config.settings import ProcessingConfig
 from src.infrastructure.delivery.categories import VALID_BRIEFING_CATEGORIES
 
 logger = logging.getLogger(__name__)
@@ -85,7 +79,7 @@ class LLMBackendError(RuntimeError):
 
     개별 응답 파싱 실패와 달리 같은 백엔드로 재시도해도 소용없는 오류.
     compose/curation의 내부 예외 처리를 통과해 상위(hybrid)로 전파되어야
-    OpenAI 폴백이 트리거된다.
+    대체 CLI 백엔드 폴백이 트리거된다.
     """
 
 
@@ -274,7 +268,7 @@ class BaseLLMProcessor:
         lean: bool = False,
         tier: str = "filter",
     ) -> str:
-        """LLM 호출. 백엔드별 서브클래스(OpenAIProcessor/ClaudeCodeProcessor)가 구현한다.
+        """LLM 호출. 백엔드별 서브클래스가 구현한다.
 
         lean=True 는 "규칙이 프롬프트에 명시된 기계적 배치 작업"이라는 신호다
         (추론·도구가 품질에 기여하지 않으므로 백엔드가 그것들을 끌 수 있다).
@@ -282,8 +276,8 @@ class BaseLLMProcessor:
         피드백 보정 기반의 품질 민감 판정이라 추론이 필요하다. 작업 단위로 지정한다.
 
         tier("filter"|"process"|"dedup"|"consolidate")는 호출부가 의도한 모델
-        등급이다. model 인자는 OpenAI 모델명이라 Claude 백엔드는 자기 모델로
-        번역해야 하는데, 설정에서 model_filter == model_process 로 겹칠 수 있어
+        등급이다. model 인자는 공용 호출 시그니처용 호환 값이고, CLI 백엔드는
+        자기 모델로 번역해야 하는데 model_filter == model_process 로 겹칠 수 있어
         문자열 비교로는 복원이 불가능하다(실사고: 필터 전량이 sonnet으로 매핑).
         발행 작문처럼 상위 모델이 필요한 호출부는 tier="process", 기브리핑 판정은
         tier="dedup", 발행 확정분 병합 가드는 tier="consolidate"를 명시한다 —
@@ -325,7 +319,7 @@ class BaseLLMProcessor:
             except LLMBackendError:
                 # 백엔드 자체 장애(CLI 미설치·인증 만료·한도 소진·타임아웃)는 비관련
                 # 컷 대신 상위(hybrid)로 전파 — 여기서 삼키면 게시물이 조용히 비관련
-                # 처리되어 OpenAI 폴백이 영원히 작동하지 않는다.
+                # 처리되어 상위의 Codex 폴백이 작동하지 않는다.
                 raise
             except Exception as e:
                 logger.error(f"필터/요약 API 호출 실패: {e}")
@@ -387,7 +381,7 @@ class BaseLLMProcessor:
                         )
                     )
             except LLMBackendError:
-                raise  # 백엔드 장애는 상위(hybrid)로 — OpenAI 폴백 트리거
+                raise  # 백엔드 장애는 상위(hybrid)로 — Codex 폴백 트리거
             except Exception as e:
                 # 폴백 결과를 만들지 않고 배치를 통째로 누락시킨다 — 과거의
                 # ["Other"] 폴백은 sanitize에서 전멸해 배치 40건이 비관련으로
@@ -431,7 +425,7 @@ class BaseLLMProcessor:
                 if isinstance(idx, int) and 0 <= idx < len(tiers) and tier in ("major", "notable", "minor"):
                     tiers[idx] = tier
         except LLMBackendError:
-            raise  # 백엔드 장애는 상위(hybrid)로 — 전부-minor 강등 대신 OpenAI 폴백
+            raise  # 백엔드 장애는 상위(hybrid)로 — 전부-minor 강등 대신 Codex 폴백
         except Exception as e:
             logger.warning(f"티어 판정 실패(전부 minor 처리): {e}")
 
@@ -542,7 +536,7 @@ class BaseLLMProcessor:
                 )
                 parsed = _parse_json_response(response_text)
             except LLMBackendError:
-                raise  # 백엔드 장애는 상위(hybrid)로 — OpenAI 폴백 트리거
+                raise  # 백엔드 장애는 상위(hybrid)로 — Codex 폴백 트리거
             except Exception as e:
                 logger.warning(f"발행 항목 작문 실패(결정적 초안 유지): {e}")
                 continue
@@ -606,7 +600,7 @@ class BaseLLMProcessor:
                 data = _parse_json_object(response_text)
                 break
             except LLMBackendError:
-                raise  # 백엔드 장애는 상위(hybrid)로 — OpenAI 폴백 트리거
+                raise  # 백엔드 장애는 상위(hybrid)로 — Codex 폴백 트리거
             except Exception as e:
                 logger.warning(f"큐레이션 생성 시도 {attempt + 1} 실패 (audience={audience}): {e}")
         if data is None:
@@ -681,7 +675,7 @@ class BaseLLMProcessor:
                 parsed = _parse_json_response(response_text)
             except LLMBackendError:
                 # 백엔드 장애는 상위(hybrid)로 — 청크 스킵(중복 발행 허용)보다
-                # OpenAI로 판정을 완주하는 쪽이 낫다.
+                # Codex로 판정을 완주하는 쪽이 낫다.
                 raise
             except Exception as e:
                 logger.warning(f"기브리핑 판정 청크 실패(해당 청크만 스킵): {e}")
@@ -856,78 +850,8 @@ class BaseLLMProcessor:
         return merged_topics
 
 
-class OpenAIProcessor(BaseLLMProcessor):
-    """OpenAI GPT API 백엔드 (Chat Completions + DuckDuckGo 웹검증)."""
-
-    def __init__(self, api_key: str, config: ProcessingConfig):
-        self._client = OpenAI(api_key=api_key)
-        self._config = config
-
-    def _curation_model(self) -> str:
-        # Curation needs reliable short JSON, not heavyweight reasoning.
-        return self._config.model_filter
-
-    def _call_api(
-        self,
-        model: str,
-        prompt: str,
-        max_tokens: int = 4096,
-        *,
-        lean: bool = False,
-        tier: str = "filter",
-    ) -> str:
-        """OpenAI Chat Completions API 동기 호출.
-
-        gpt-5 계열(추론 모델)은 추론 토큰이 completion 한도를 같이 소모해
-        content가 비어 올 수 있다 — 이 경우 한도를 2배로 올려 1회만 재시도하고,
-        그래도 비면 명시적 예외를 던져 호출부의 실패 처리(배치 스킵 등)를 태운다.
-
-        lean/tier 는 받되 사용하지 않는다 — 이 백엔드는 model 인자가 곧 실제
-        모델명이고(번역 불필요), 모든 gpt-5 호출에 이미 reasoning_effort="low"
-        를 걸고 있어 추가로 끌 것도 없다.
-        """
-        is_legacy = "gpt-4o" in model
-        params: dict = {
-            "model": model,
-            "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": prompt},
-            ],
-        }
-        if is_legacy:
-            params["max_tokens"] = max_tokens
-            params["temperature"] = 0.1
-        else:
-            params["max_completion_tokens"] = max_tokens
-            # 분류/요약류 배치 작업엔 긴 추론이 불필요 — 추론 토큰(출력 과금) 절감
-            params["reasoning_effort"] = "low"
-
-        for attempt in range(2):
-            response = self._client.chat.completions.create(**params)
-            choice = response.choices[0]
-            content = choice.message.content or ""
-            # 비용 실측용 — 추론 토큰(출력 과금)이 지배 비용이라 호출마다 기록
-            usage = getattr(response, "usage", None)
-            if usage:
-                details = getattr(usage, "completion_tokens_details", None)
-                reasoning = getattr(details, "reasoning_tokens", 0) if details else 0
-                logger.info(
-                    f"[usage] model={model} in={usage.prompt_tokens} "
-                    f"out={usage.completion_tokens} (reasoning={reasoning})"
-                )
-            if content.strip():
-                return content
-            if is_legacy or attempt == 1:
-                break
-            logger.warning(
-                f"빈 응답(finish_reason={choice.finish_reason}, model={model}) — "
-                f"completion 한도 {max_tokens}→{max_tokens * 2}로 1회 재시도"
-            )
-            params["max_completion_tokens"] = max_tokens * 2
-
-        raise RuntimeError(
-            f"LLM 빈 응답 (model={model}, finish_reason={choice.finish_reason})"
-        )
+class SearchVerificationProcessor(BaseLLMProcessor):
+    """DuckDuckGo 검색을 이용하는 검증 파이프라인."""
 
     async def verify_claims(self, posts: list[Post]) -> list[VerificationResult]:
         """게시물의 핵심 주장을 웹 검색(DuckDuckGo)으로 교차 검증."""

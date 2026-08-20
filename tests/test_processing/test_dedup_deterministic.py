@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from src.domain.entities import Post
-from src.infrastructure.ai.openai_processor import BaseLLMProcessor
+from src.infrastructure.ai.llm_processor import BaseLLMProcessor
 
 
 class _StubProcessor(BaseLLMProcessor):

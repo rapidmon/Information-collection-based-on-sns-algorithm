@@ -1,7 +1,7 @@
 """Claude Code CLI 기반 AI 프로세서 (API 키 없이 구독 인증 사용).
 
-OpenAIProcessor의 프롬프트·JSON 파싱·토픽 병합·웹 검색 로직을 그대로 상속하고,
-실제 LLM 호출(_call_api)만 OpenAI API → `claude -p` 헤드리스 호출로 교체한다.
+공용 프롬프트·JSON 파싱·토픽 병합 로직을 상속하고 실제 LLM 호출(_call_api)만
+`claude -p` 헤드리스 실행으로 구현한다.
 
 동작 검증으로 확정한 호출 레시피(깨지기 쉬운 지점 회피):
 - `claude -p --output-format json --model <claude-model> --max-turns 1`
@@ -27,7 +27,7 @@ import subprocess
 import tempfile
 
 from src.domain.services.ai_processor import VerificationResult
-from src.infrastructure.ai.openai_processor import (
+from src.infrastructure.ai.llm_processor import (
     BaseLLMProcessor,
     LLMBackendError,
     _parse_json_response,
@@ -92,7 +92,7 @@ def _resolve_claude_bin() -> str:
 #   추론 끔 → 출력 2,236 tok / 호출당 총 등가 35,270   (출력 −68%, 총 −45%)
 #   판정 결과(40/40건, 관련 8건=20%)와 요약 길이(89자→88자)는 동일했다.
 # 규칙이 프롬프트에 명시된 분류 작업이라 추론이 기여하는 바가 없다.
-# OpenAI 경로가 이미 reasoning_effort="low"를 쓰는 것과 같은 취지 —
+# 저비용 필터 티어와 같은 취지 —
 # 이 설정을 빼고 Claude로 옮기면 추론 비용이 조용히 되살아난다.
 #
 # 도구·번들 스킬은 이 작업에서 쓰이지 않아 시스템 프롬프트에서 뺀다.
@@ -113,7 +113,7 @@ class ClaudeCodeProcessor(BaseLLMProcessor):
 
     BaseLLMProcessor(공용 파이프라인)를 상속해 필터/분류/티어/병합/큐레이션을
     재사용하고, LLM 호출부(_call_api)와 웹검증(verify_claims)만 Claude용으로 구현한다.
-    OpenAI 클라이언트/키가 필요 없다.
+    별도 API 클라이언트나 키가 필요 없다.
     """
 
     def __init__(
@@ -128,7 +128,6 @@ class ClaudeCodeProcessor(BaseLLMProcessor):
         oauth_token: str | None = None,
         work_dir: str | None = None,
     ):
-        # NOTE: super().__init__()를 호출하지 않는다 (OpenAI 클라이언트 생성을 피함).
         self._config = config
         self._claude_bin = claude_bin or _resolve_claude_bin()
         self._claude_model_filter = model_filter
@@ -172,7 +171,7 @@ class ClaudeCodeProcessor(BaseLLMProcessor):
         full_prompt = f"{SYSTEM_PROMPT}\n\n{prompt}" if use_system_prompt else prompt
         cmd = self._build_command(args)
         # CLI 수준 장애는 전부 LLMBackendError로 승격 — compose/curation의 내부
-        # 예외 삼킴을 통과해 hybrid의 OpenAI 폴백이 실제로 작동하게 한다.
+        # 예외 삼킴을 통과해 hybrid의 Codex 폴백이 실제로 작동하게 한다.
         try:
             proc = subprocess.run(
                 cmd,
@@ -197,7 +196,7 @@ class ClaudeCodeProcessor(BaseLLMProcessor):
         except json.JSONDecodeError as e:
             raise LLMBackendError(f"{label} 응답 봉투 JSON 파싱 실패: {(proc.stdout or '')[:300]}") from e
 
-        # 구독 한도 소비 실측용 — OpenAI 경로의 [usage] 포맷과 맞춰
+        # 구독 한도 소비 실측용 — Codex 경로의 [usage] 포맷과 맞춰
         # scripts/usage_report.py 가 양쪽을 합산할 수 있게 한다.
         # is_error 여부와 무관하게 기록한다(실패한 호출도 토큰은 소비됨).
         # 캐시를 따로 보는 이유: 한도 가중치가 다르다(cache_read ~0.1x) —
@@ -227,12 +226,12 @@ class ClaudeCodeProcessor(BaseLLMProcessor):
         lean: bool = False,
         tier: str = "filter",
     ) -> str:
-        """호출부가 명시한 tier로 Claude 모델을 고른다. (max_tokens는 CLI 무시, model은 OpenAI명이라 미사용)
+        """호출부가 명시한 tier로 Claude 모델을 고른다. (max_tokens/model은 호환용)
 
         tier 문자열 비교여야 하는 이유: 과거엔 model 인자를 config.model_process
         와 비교해 매핑했는데, 설정에서 model_filter == model_process("gpt-5-mini")
         가 되자 필터/분류 전량이 sonnet으로 오매핑되어 구독 한도를 상위 모델
-        요율로 소모했다(2026-07-30 실사고). OpenAI 모델명으로는 호출부의 의도를
+        요율로 소모했다(2026-07-30 실사고). 호환용 model 값으로는 호출부의 의도를
         복원할 수 없다 — 티어는 호출부가 직접 말해야 한다.
 
         lean=True 인 호출에만 감량 플래그를 붙인다 — 근거는 위 _LEAN_* 주석.
@@ -315,7 +314,7 @@ class ClaudeCodeProcessor(BaseLLMProcessor):
             )
             claims = _parse_json_response(resp)
         except LLMBackendError:
-            # CLI 장애는 hybrid의 OpenAI 폴백으로 — 검증 전체 스킵(스캠 통과)보다 낫다
+            # CLI 장애는 hybrid의 Codex 폴백으로 — 검증 전체 스킵(스캠 통과)보다 낫다
             raise
         except Exception as e:
             logger.warning(f"주장 추출 실패(검증 스킵): {e}")
@@ -348,7 +347,7 @@ class ClaudeCodeProcessor(BaseLLMProcessor):
                 ))
                 verified_ids.add(pid)
         except LLMBackendError:
-            raise  # CLI 장애는 hybrid의 OpenAI 폴백으로 — 전체 통과보다 낫다
+            raise  # CLI 장애는 hybrid의 Codex 폴백으로 — 전체 통과보다 낫다
         except Exception as e:
             logger.warning(f"Claude 웹검증 실패(스킵/통과): {e}")
 

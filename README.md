@@ -27,7 +27,7 @@ SNS(X, Threads, LinkedIn, DCInside)와 뉴스 소스(외신·AI 기업 RSS, 36kr
    - 웹 검색 교차검증으로 스캠/허위 게시물 제거
    - 카테고리 분류 (AI, 반도체, 클라우드 등 8개) + 중요도 산정
    - 대시보드에서 남긴 항목 평가(적절/과대/과소)가 다음 중요도 채점에 few-shot으로 반영
-   - 고빈도 배치(필터·분류·검증)는 OpenAI, 품질 민감한 작문·큐레이션은 Claude 사용
+   - Codex CLI와 Claude Code CLI를 사용하며, `codex_only` 기간에는 전 단계를 Codex로 실행
    - AI 처리 후 중요 게시물엔 자동 좋아요(선택 기능)
 
 3. 브리핑 발송 (매일 오전 8시)
@@ -46,8 +46,8 @@ SNS(X, Threads, LinkedIn, DCInside)와 뉴스 소스(외신·AI 기업 RSS, 36kr
 
 - **Python 3.12 이상** ([다운로드](https://www.python.org/downloads/))
 - **Google Chrome** (이미 설치되어 있을 가능성이 높음)
-- **OpenAI API 키** ([발급 방법](https://platform.openai.com/api-keys)) — 필터/분류/검증용, 월 $2~5 수준
-- **Claude Code CLI** (선택이지만 권장) — 브리핑 작문·큐레이션용. 구독 로그인만 돼 있으면 API 키 불필요, 없으면 OpenAI로 자동 폴백
+- **Codex CLI** — 필터·분류·검증 및 Claude 장애 시 폴백. ChatGPT 구독 로그인을 사용
+- **Claude Code CLI** (선택) — 기본 모드의 작문·큐레이션용. `codex_only: true`이면 호출하지 않음
 - **Gmail 계정** — 브리핑 이메일 발송용
 
 ### 1단계: 프로젝트 다운로드
@@ -69,9 +69,6 @@ playwright install chromium
 프로젝트 폴더에 `.env` 파일을 만들고 아래 내용을 채워주세요.
 
 ```env
-# OpenAI API 키 (https://platform.openai.com/api-keys 에서 발급)
-OPENAI_API_KEY=sk-...
-
 # Gmail 이메일 발송 설정
 # Gmail 앱 비밀번호 발급 방법:
 #   1. Google 계정 → 보안 → 2단계 인증 활성화
@@ -285,8 +282,8 @@ python main.py serve --no-scheduler
                ▼
    ┌────────────────────────────┐
    │   AI 처리 (하이브리드)      │
-   │ 필터·분류·검증: OpenAI     │
-   │ 작문·큐레이션: Claude Code │
+   │ 필터·분류·검증: Codex CLI  │
+   │ 작문·큐레이션: Claude/Codex│
    └──────┬──────────────┬──────┘
           │              │
           ▼              ▼
@@ -318,8 +315,8 @@ python main.py serve --no-scheduler
 |------|------|
 | 언어 | Python 3.12+ |
 | 브라우저 자동화 | Playwright (Chrome CDP) |
-| AI (필터·분류·검증) | OpenAI gpt-5-mini |
-| AI (작문·큐레이션) | Claude Code CLI (구독 인증, OpenAI 폴백) |
+| AI (필터·분류·검증) | Codex CLI (Luna/Sol/Terra, 구독 인증) |
+| AI (작문·큐레이션) | Claude Code CLI 또는 Codex CLI (구독 인증) |
 | 게시물 저장소 | SQLite (로컬, 비용 $0) |
 | 브리핑 저장소 | Firebase Firestore (선택) |
 | 웹 서버 | FastAPI + uvicorn |
@@ -344,7 +341,7 @@ sns_algorithm_data_collection/
 │   │       └── scheduler.py
 │   ├── infrastructure/
 │   │   ├── collectors/      # SNS(CDP)·HTTP 수집기
-│   │   ├── ai/              # OpenAI·Claude 프로세서, 프롬프트, 클러스터링·스코어링
+│   │   ├── ai/              # Codex·Claude CLI 프로세서, 프롬프트, 클러스터링·스코어링
 │   │   ├── database/        # SQLite·Firestore 레포지토리
 │   │   ├── delivery/        # 이메일 렌더러·브리핑 빌더
 │   │   └── config/          # 설정 로더 + Container (의존성 조립)

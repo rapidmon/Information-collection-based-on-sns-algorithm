@@ -1,7 +1,7 @@
 """배치 루프의 LLMBackendError 전파 — 폴백 버그 회귀 방지.
 
 과거엔 배치 루프의 `except Exception`이 CLI 장애까지 삼켜 게시물을 조용히
-비관련 처리했고, hybrid의 OpenAI 폴백이 영원히 작동하지 않았다.
+비관련 처리했고, hybrid의 Codex 폴백이 영원히 작동하지 않았다.
 백엔드 장애는 전파되어야 하고, 일반 오류(파싱·빈 응답)는 기존대로
 배치 단위 실패 처리(비관련 컷/배치 스킵)를 유지해야 한다.
 """
@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 
 from src.domain.entities import Post
-from src.infrastructure.ai.openai_processor import BaseLLMProcessor, LLMBackendError
+from src.infrastructure.ai.llm_processor import BaseLLMProcessor, LLMBackendError
 from src.infrastructure.config.settings import ProcessingConfig
 
 

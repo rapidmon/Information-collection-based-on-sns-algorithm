@@ -67,7 +67,7 @@ README 다이어그램은 Firestore에 Posts가 가는 것처럼 보이지만, �
 - 모든 수집기는 `domain/services/collector.py`의 `Collector` Protocol(`source_name`, `collect()`, `is_session_valid()`)을 구현.
 - 스케줄러는 CDP 동시 접속 충돌을 막으려고 소스별 시작을 **2분씩 stagger**한다.
 
-### AI 처리 파이프라인 — `process_posts.py` + `ai/openai_processor.py`
+### AI 처리 파이프라인 — `process_posts.py` + `ai/llm_processor.py`
 
 청크 단위로 4단계를 거친다: **① filter+summarize → ② verify_claims(웹 검색 교차검증으로 스캠/허위 제거) → ③ categorize+중요도 → ④ 청크별 즉시 DB 업데이트**(크래시 시 진행분 보존). AI 응답에 누락된 게시물은 비관련 처리해 재처리 루프를 막는다. 비용 최적화로 필터는 저렴한 모델, 처리는 상위 모델을 쓴다(모델명은 YAML `processing.model_*`).
 

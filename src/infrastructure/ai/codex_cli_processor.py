@@ -1,12 +1,8 @@
 """Codex CLI(`codex exec`)를 LLM 백엔드로 쓰는 AI 프로세서.
 
-OpenAI Chat Completions API(종량 과금)를 대체한다. Codex CLI는 ChatGPT 구독으로
-인증되므로 토큰당 실지출이 0이고, API 키도 필요 없다.
-
-OpenAIProcessor를 상속하는 이유는 **웹검증(verify_claims) 재사용** 때문이다 —
-그 구현은 DuckDuckGo 검색 + `_call_api`만 쓰고 OpenAI 클라이언트를 건드리지 않아
-백엔드를 바꿔도 그대로 동작한다. `__init__`에서 super()를 호출하지 않아
-OpenAI 클라이언트 생성(=API 키 요구)을 피한다.
+Codex CLI는 ChatGPT 구독으로 인증되므로 별도 API 키가 필요 없다.
+공용 처리 파이프라인과 DuckDuckGo 웹검증을 상속하고 실제 LLM 호출만
+`codex exec` 헤드리스 실행으로 구현한다.
 """
 
 from __future__ import annotations
@@ -18,7 +14,7 @@ import shutil
 import subprocess
 import tempfile
 
-from src.infrastructure.ai.openai_processor import LLMBackendError, OpenAIProcessor
+from src.infrastructure.ai.llm_processor import LLMBackendError, SearchVerificationProcessor
 from src.infrastructure.ai.prompts import SYSTEM_PROMPT
 from src.infrastructure.config.settings import ProcessingConfig
 
@@ -30,7 +26,7 @@ def _resolve_codex_bin() -> str:
     return shutil.which("codex") or shutil.which("codex.cmd") or "codex"
 
 
-class CodexCliProcessor(OpenAIProcessor):
+class CodexCliProcessor(SearchVerificationProcessor):
     """`codex exec` 헤드리스 실행 기반 프로세서 (ChatGPT 구독, API 키 불필요)."""
 
     def __init__(
@@ -48,7 +44,6 @@ class CodexCliProcessor(OpenAIProcessor):
         timeout: int = 600,
         work_dir: str | None = None,
     ):
-        # NOTE: super().__init__()를 호출하지 않는다 (OpenAI 클라이언트 생성을 피함).
         self._config = config
         self._codex_bin = codex_bin or _resolve_codex_bin()
         self._codex_model_filter = model_filter
@@ -87,7 +82,7 @@ class CodexCliProcessor(OpenAIProcessor):
     def _log_usage(stdout: str, model: str) -> None:
         """turn.completed 이벤트의 토큰 사용량을 [usage] 형식으로 남긴다.
 
-        scripts/usage_report.py 가 Claude/OpenAI 경로와 합산할 수 있게 포맷을 맞춘다.
+        scripts/usage_report.py 가 Claude 경로와 합산할 수 있게 포맷을 맞춘다.
         """
         for line in (stdout or "").splitlines():
             line = line.strip()
@@ -119,7 +114,7 @@ class CodexCliProcessor(OpenAIProcessor):
     ) -> str:
         """`codex exec`를 헤드리스로 실행하고 최종 메시지를 반환한다.
 
-        model 인자는 무시한다 — OpenAI 모델명이라 codex 모델과 대응되지 않는다.
+        model 인자는 무시한다 — 공용 호출 시그니처의 호환 값이다.
         호출부가 넘긴 tier로 고른다(ClaudeCodeProcessor와 같은 이유: 설정에서
         model_filter == model_process 가 되면 모델명으로는 호출 의도를 복원할 수 없다).
         max_tokens도 CLI에 대응 옵션이 없어 사용하지 않는다.
@@ -132,10 +127,11 @@ class CodexCliProcessor(OpenAIProcessor):
             "dedup": self._codex_model_dedup,
             "consolidate": self._codex_model_consolidate,
         }.get(tier, self._codex_model_filter)
-        # lean=True 는 "규칙이 프롬프트에 명시된 기계적 배치"라는 신호 — 추론을 끈다.
+        # lean=True 는 기계적 배치라는 신호다. 현재 Codex CLI 카탈로그의 GPT-5.6
+        # 모델은 none을 노출하지 않으므로 필터 티어의 최저 지원 강도를 사용한다.
         # ⚠️ 티어로 판단하면 안 된다: judge_tiers 는 filter 티어지만 품질 민감이라
         # 추론이 필요하다. 호출부가 lean 으로 직접 말한다(Claude 경로와 같은 규칙).
-        effort = "none" if lean else {
+        effort = self._effort_filter if lean else {
             "process": self._effort_process,
             "dedup": self._effort_dedup,
             "consolidate": self._effort_consolidate,
