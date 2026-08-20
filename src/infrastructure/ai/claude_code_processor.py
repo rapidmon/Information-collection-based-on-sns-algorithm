@@ -39,6 +39,23 @@ from src.infrastructure.config.settings import ProcessingConfig
 logger = logging.getLogger(__name__)
 
 
+def _is_real_exe(path: str) -> bool:
+    """PE 실행 파일인지(매직 'MZ') 확인한다.
+
+    npm의 @anthropic-ai/claude-code 는 플랫폼 네이티브 패키지를 못 받으면
+    bin/claude.exe 자리에 **안내문을 echo 하는 500바이트 셸 스크립트**를 남긴다.
+    이걸 실행하면 WinError 216(유효한 Win32 응용 프로그램이 아님)이 나는데,
+    파일이 존재하고 이름도 claude.exe라 경로 탐색은 성공한 것처럼 보인다.
+    (2026-08-20 실사고: latest=2.1.237 인데 win32-x64 네이티브는 2.1.236까지만
+     배포돼 있어 윈도우에서 latest를 깔면 이 스텁이 남는다.)
+    """
+    try:
+        with open(path, "rb") as f:
+            return f.read(2) == b"MZ"
+    except OSError:
+        return False
+
+
 def _resolve_claude_bin() -> str:
     """실행 가능한 claude 바이너리 경로를 찾는다.
 
@@ -46,6 +63,9 @@ def _resolve_claude_bin() -> str:
     깨지므로, 가능하면 실제 claude.exe를 우선 사용한다. 못 찾으면 PATH의 claude
     (Linux/mac 바이너리) 또는 .cmd 셰임으로 폴백한다(.cmd는 _build_command에서
     cmd.exe /c로 감싼다).
+
+    .exe 후보는 PE 매직으로 검증한다 — 검증 없이 고르면 npm이 남긴 스텁을
+    집어 모든 호출이 WinError 216으로 죽는다(_is_real_exe 참조).
     """
     for env_var in ("APPDATA", "ProgramFiles", "LOCALAPPDATA"):
         base = os.environ.get(env_var)
@@ -54,9 +74,14 @@ def _resolve_claude_bin() -> str:
         pattern = os.path.join(
             base, "npm", "node_modules", "@anthropic-ai", "claude-code", "**", "claude.exe"
         )
-        hits = glob.glob(pattern, recursive=True)
-        if hits:
-            return hits[0]
+        for hit in glob.glob(pattern, recursive=True):
+            if _is_real_exe(hit):
+                return hit
+            logger.warning(
+                "claude.exe 후보가 실제 실행 파일이 아님(네이티브 패키지 미설치 스텁) — 건너뜀: %s. "
+                "복구: npm install -g @anthropic-ai/claude-code@stable",
+                hit,
+            )
     return shutil.which("claude") or shutil.which("claude.cmd") or "claude"
 
 

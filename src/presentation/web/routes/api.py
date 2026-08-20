@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["api"])
 
@@ -200,6 +203,7 @@ async def slack_events(request: Request):
 
     secret = c.settings.slack_signing_secret
     if not secret:
+        logger.warning("[slack/events] signing secret 미설정 — 이벤트 수신 불가")
         return JSONResponse(status_code=503, content={"error": "signing secret 미설정"})
     if not verify_slack_signature(
         secret,
@@ -207,12 +211,30 @@ async def slack_events(request: Request):
         body,
         request.headers.get("x-slack-signature", ""),
     ):
+        # 조용한 401은 진단이 불가능하다 — Slack이 안 보낸 건지, 보냈는데 우리가
+        # 거절한 건지 구분이 안 돼 며칠을 헤맬 수 있다(2026-08 실제 사례).
+        # 서명 불일치의 최빈 원인은 .env의 SLACK_SIGNING_SECRET이 앱의 현재 값과
+        # 다른 것(재발급·앱 재설치 후 미갱신)이다.
+        logger.warning(
+            "[slack/events] 서명 검증 실패 — 요청은 도달했다. "
+            "SLACK_SIGNING_SECRET이 앱 현재 값과 일치하는지 확인 "
+            f"(ts={request.headers.get('x-slack-request-timestamp', '')!r}, "
+            f"sig_present={bool(request.headers.get('x-slack-signature'))}, "
+            f"len={len(body)})"
+        )
         return JSONResponse(status_code=401, content={"error": "invalid signature"})
 
     try:
         data = _json.loads(body)
     except Exception:
         return JSONResponse(status_code=400, content={"error": "bad json"})
+
+    logger.info(
+        "[slack/events] 수신: type=%s event=%s retry=%s",
+        data.get("type"),
+        (data.get("event") or {}).get("type"),
+        request.headers.get("x-slack-retry-num") or "-",
+    )
 
     # 최초 URL 등록 시 슬랙이 보내는 검증 챌린지
     if data.get("type") == "url_verification":
