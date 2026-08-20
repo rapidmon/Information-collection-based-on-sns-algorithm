@@ -21,6 +21,7 @@ from src.infrastructure.ai.hybrid_processor import HybridAIProcessor
 from src.infrastructure.ai.openai_processor import OpenAIProcessor
 from src.infrastructure.collectors.account_follower import CdpAccountFollower
 from src.infrastructure.collectors.dcinside_collector import DCInsideCollector
+from src.infrastructure.collectors.donga_series_collector import DongaSeriesCollector
 from src.infrastructure.collectors.kr36_collector import Kr36Collector
 from src.infrastructure.collectors.linkedin_collector import LinkedInCollector
 from src.infrastructure.collectors.news_collector import NewsCollector
@@ -105,6 +106,15 @@ class Container:
 
         if "dcinside" in collector_configs and collector_configs["dcinside"].enabled:
             self.collectors["dcinside"] = DCInsideCollector(collector_configs["dcinside"])
+
+        if (
+            "donga_series" in collector_configs
+            and collector_configs["donga_series"].enabled
+            and collector_configs["donga_series"].series_url
+        ):
+            self.collectors["donga_series"] = DongaSeriesCollector(
+                collector_configs["donga_series"]
+            )
 
         if "36kr" in collector_configs and collector_configs["36kr"].enabled:
             self.collectors["36kr"] = Kr36Collector(collector_configs["36kr"])
@@ -293,6 +303,20 @@ class Container:
                 results["slack"] = await self.slack_notifier.send_briefing(slack_view, date_str)
             except Exception as e:
                 results["slack"] = {"sent": False, "error": str(e)}
+
+            # 슬랙 전용 소스(동아 연재 등) — AI를 안 태우므로 별도 섹션으로 붙인다.
+            # 이메일 발송은 이미 끝난 뒤라 여기 항목은 메일에 들어가지 않는다.
+            try:
+                extras = await self.post_repo.get_slack_only_unbriefed()
+                if extras:
+                    posted = await self.slack_notifier.post_extra_section(extras)
+                    if posted:
+                        await self.post_repo.mark_briefed(
+                            [p.id for p in extras], datetime.utcnow()
+                        )
+                    results["slack_extras"] = {"sent": posted, "items": len(extras)}
+            except Exception as e:
+                results["slack_extras"] = {"sent": False, "error": str(e)}
         return results
 
     async def run_slack_vote_winner(self) -> dict:

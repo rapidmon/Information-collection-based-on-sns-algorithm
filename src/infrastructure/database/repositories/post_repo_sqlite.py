@@ -18,6 +18,10 @@ from src.domain.entities import Post
 
 DB_PATH = Path("data/posts.db")
 
+# 이메일 브리핑에는 넣지 않고 슬랙에만 별도 섹션으로 붙이는 소스.
+# AI 필터·채점을 태우지 않으므로 일반 브리핑의 상대평가에 섞이면 안 된다.
+SLACK_ONLY_SOURCES = ("donga_series",)
+
 # SQLite 연결 풀 (스레드 로컬 저장소)
 _thread_local = threading.local()
 
@@ -618,17 +622,41 @@ class PostRepositorySQLite:
         return await asyncio.to_thread(_query)
 
     async def get_unbriefed(self, limit: int = 500) -> list[Post]:
-        """브리핑에 포함되지 않은 관련 게시물 조회 (briefed_at IS NULL)."""
+        """브리핑에 포함되지 않은 관련 게시물 조회 (briefed_at IS NULL).
+
+        SLACK_ONLY_SOURCES는 제외한다 — AI 채점을 안 거쳐 importance_score가 없고,
+        일반 브리핑의 상대평가·dedup에 섞이면 안 되기 때문이다. 이들은 슬랙 발송
+        단계에서 별도 섹션으로 붙는다(get_slack_only_unbriefed).
+        """
         def _query():
             conn = _get_db()
             cursor = conn.cursor()
-            cursor.execute("""
+            placeholders = ",".join("?" * len(SLACK_ONLY_SOURCES))
+            cursor.execute(f"""
                 SELECT * FROM posts
                 WHERE is_relevant = 1
                   AND briefed_at IS NULL
+                  AND source NOT IN ({placeholders})
                 ORDER BY collected_at DESC
                 LIMIT ?
-            """, (limit,))
+            """, (*SLACK_ONLY_SOURCES, limit))
+            return [_post_from_row(row) for row in cursor.fetchall()]
+
+        return await asyncio.to_thread(_query)
+
+    async def get_slack_only_unbriefed(self, limit: int = 20) -> list[Post]:
+        """슬랙 전용 소스의 미발송분 (오래된 것부터 — 올라온 순서대로 보여준다)."""
+        def _query():
+            conn = _get_db()
+            cursor = conn.cursor()
+            placeholders = ",".join("?" * len(SLACK_ONLY_SOURCES))
+            cursor.execute(f"""
+                SELECT * FROM posts
+                WHERE briefed_at IS NULL
+                  AND source IN ({placeholders})
+                ORDER BY published_at ASC, collected_at ASC
+                LIMIT ?
+            """, (*SLACK_ONLY_SOURCES, limit))
             return [_post_from_row(row) for row in cursor.fetchall()]
 
         return await asyncio.to_thread(_query)

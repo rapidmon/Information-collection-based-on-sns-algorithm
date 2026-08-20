@@ -39,6 +39,12 @@ collection:
   producthunt:
     enabled: true
     interval_minutes: 120  # AI 제품 런칭·쇼케이스 (Atom RSS, 로그인 불필요)
+  donga_series:
+    enabled: true
+    interval_minutes: 120  # 동아일보 연재 — AI 필터/채점 없이 슬랙 브리핑에만 별도 섹션으로
+    series_url: "https://www.donga.com/news/Series/70010000001071"
+    series_name: "트렌디깅"
+    max_age_days: 7        # 연재는 게시 주기가 길어 전역(2일)보다 넉넉히
   news:
     enabled: true
     interval_minutes: 60   # 외신·AI 기업 1차 소스 RSS (HTTP, 로그인 불필요)

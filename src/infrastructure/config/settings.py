@@ -84,6 +84,9 @@ class CollectorConfig:
         # news 전용 — RSS/Atom 피드 선언 목록 [{name, tier, url}] + 피드당 항목 상한
         self.feeds: list[dict[str, Any]] = data.get("feeds", [])
         self.max_items_per_feed: int = data.get("max_items_per_feed", 30)
+        # donga_series 전용 — 연재 페이지 URL과 표시용 시리즈명
+        self.series_url: str = data.get("series_url", "")
+        self.series_name: str = data.get("series_name", "연재")
 
 
 class CategoryConfig:

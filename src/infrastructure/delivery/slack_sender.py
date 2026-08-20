@@ -382,7 +382,62 @@ class SlackNotifier:
             "total": len(items),
         }
 
+    async def post_extra_section(self, posts: list) -> bool:
+        """슬랙 전용 소스(동아 연재 등)를 브리핑 아래 별도 섹션으로 게시한다.
+
+        AI 필터·채점을 안 거친 항목이라 투표 리액션을 붙이지 않는다 — 투표는
+        중요도 학습 신호인데, 채점 대상이 아닌 글에 표를 받으면 의미가 섞인다.
+        헤더 1개 + 항목별 스레드 댓글로, 본 브리핑과 같은 모양을 쓴다.
+        """
+        if not self._config.enabled or not self._token or not self._config.channel:
+            return False
+        if not posts:
+            return False
+
+        label = posts[0].author or "연재"
+        head_text = (
+            f"📰 *{_esc(label)}* — 새 글 {len(posts)}건\n"
+            "_이 섹션은 이메일 브리핑에는 포함되지 않아요._"
+        )
+        async with httpx.AsyncClient(
+            timeout=30.0,
+            headers={"Authorization": f"Bearer {self._token}"},
+        ) as client:
+            head = await self._call(client, "chat.postMessage", {
+                "channel": self._config.channel,
+                "text": head_text,
+                "unfurl_links": False,
+                "unfurl_media": False,
+            })
+            channel_id = head["channel"]
+            thread_ts = head["ts"]
+
+            posted = 0
+            for p in posts:
+                await asyncio.sleep(POST_INTERVAL_SECONDS)
+                try:
+                    title = (p.content_text or "").split("\n")[0].strip()
+                    lines = [f"• *{_esc(title)}*"]
+                    if p.summary and p.summary.strip() != title:
+                        lines.append(_esc(p.summary.strip()))
+                    if p.url:
+                        lines.append(f"<{p.url}|기사 보기>")
+                    await self._call(client, "chat.postMessage", {
+                        "channel": channel_id,
+                        "thread_ts": thread_ts,
+                        "text": "\n".join(lines),
+                        "unfurl_links": False,
+                        "unfurl_media": False,
+                    })
+                    posted += 1
+                except Exception as e:
+                    logger.error(f"슬랙 연재 항목 게시 실패(계속 진행): {e}")
+
+        logger.info(f"슬랙 연재 섹션 게시: {posted}/{len(posts)}건 ({label})")
+        return posted > 0
+
     # ─── 투표 집계 ───
+
 
     def _save_state(self, state: dict) -> None:
         """게시 상태(ts↔항목)를 저장. 매일 덮어쓴다. 실패해도 발송 자체는 성공 처리."""
