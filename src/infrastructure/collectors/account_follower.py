@@ -14,11 +14,9 @@ CNBC/economics/CNN/SquawkCNBC). 첫 매치를 집으면 엉뚱한 계정을 팔�
 - threads: aria-label도 data-testid도 없다. 대신 프로필 페이지에서 정확히
   '팔로우' 텍스트를 가진 role=button 이 **딱 1개**다(6개 프로필 실측). 그래서
   개수가 1일 때만 누르고, 2개 이상이면 모호하므로 중단한다.
-- linkedin: **지원하지 않는다.** 대상 자신의 버튼은 aria-label이 이름 없는
-  "팔로우중"인데 추천 계정들은 이름이 붙은 "○○ 팔로우"라, 트위터 방식을 쓰면
-  정확히 엉뚱한 계정만 골라 팔로우한다(실측: /company/openai/ 에서 본인 버튼은
-  '팔로우중', 나머지는 Anthropic·Google·NVIDIA…). 개인 프로필(/in/)은 본인
-  팔로우 버튼이 없고 '연결'이 기본이라 동작 자체가 다르다.
+- linkedin: 회사(/company/) 페이지 상단의 대상 전용
+  `org-company-follow-button org-top-card-primary-actions__action`만 누른다. 추천
+  회사 버튼에는 이 클래스가 없으므로 섞이지 않는다. 개인(/in/)은 지원하지 않는다.
 
 '팔로우' 텍스트 버튼만 누르므로 최악의 경우에도 언팔로우는 일어나지 않는다.
 """
@@ -28,13 +26,14 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import re
 
 from src.infrastructure.collectors.cdp import cdp_connection, minimize_window
 from src.infrastructure.config.settings import FollowConfig
 
 logger = logging.getLogger(__name__)
 
-SUPPORTED = ("twitter", "threads")
+SUPPORTED = ("twitter", "threads", "linkedin")
 
 PROFILE_URL = {
     "twitter": "https://x.com/{handle}",
@@ -44,6 +43,20 @@ PROFILE_URL = {
 # threads: 로케일별 버튼 라벨 (정확 일치로만 매칭)
 _THREADS_FOLLOW = ("팔로우", "Follow")
 _THREADS_FOLLOWING = ("팔로잉", "Following")
+
+_LINKEDIN_COMPANY_FOLLOW = (
+    "button.org-company-follow-button.org-top-card-primary-actions__action"
+)
+
+
+def _linkedin_company_url(url: str) -> str:
+    """신뢰할 수 있는 LinkedIn 회사 URL만 정규화한다. 개인 프로필은 빈 값."""
+    match = re.match(
+        r"^https?://(?:www\.)?linkedin\.com/company/([^/?#]+)",
+        (url or "").strip(),
+        re.IGNORECASE,
+    )
+    return f"https://www.linkedin.com/company/{match.group(1)}/" if match else ""
 
 
 def _selectors(handle: str) -> tuple[str, str]:
@@ -108,19 +121,31 @@ class CdpAccountFollower:
     async def _follow_one(self, page, source: str, cand: dict) -> str:
         handle = (cand.get("screen_name") or "").strip()
         likes = cand.get("like_count")
+        if source == "linkedin":
+            profile_url = _linkedin_company_url(cand.get("author_url") or "")
+            if not profile_url:
+                logger.warning(
+                    f"[linkedin][follow] 회사 URL 아님 — 스킵 | {cand.get('author_url')}"
+                )
+                return "failed"
+        else:
+            profile_url = PROFILE_URL[source].format(handle=handle)
+
         if not handle:
             logger.warning(f"[{source}][follow] 핸들 없음 — 스킵 | {cand.get('author_url')}")
             return "failed"
 
         try:
             await page.goto(
-                PROFILE_URL[source].format(handle=handle),
+                profile_url,
                 wait_until="domcontentloaded",
                 timeout=30000,
             )
 
             if source == "threads":
                 return await self._follow_threads(page, handle, likes)
+            if source == "linkedin":
+                return await self._follow_linkedin_company(page, handle, likes)
 
             follow_sel, unfollow_sel = _selectors(handle)
 
@@ -169,6 +194,38 @@ class CdpAccountFollower:
         except Exception as e:
             logger.warning(f"[{source}][follow] 처리 실패 @{handle}: {e}")
             return "failed"
+
+    async def _follow_linkedin_company(self, page, company: str, likes) -> str:
+        """LinkedIn 회사 상단 CTA만 눌러 추천 회사 오팔로우를 방지한다."""
+        btn = page.locator(_LINKEDIN_COMPANY_FOLLOW).first
+        pressed = None
+        for _ in range(16):
+            if await btn.count():
+                pressed = await btn.get_attribute("aria-pressed")
+                if pressed in ("true", "false"):
+                    break
+            await page.wait_for_timeout(500)
+
+        if pressed == "true":
+            logger.info(f"[linkedin][follow] 이미 팔로우 중 — 건너뜀 | {company}")
+            return "already"
+        if pressed != "false":
+            logger.warning(f"[linkedin][follow] 회사 상단 팔로우 버튼 못 찾음 | {company}")
+            return "failed"
+
+        if self._cfg.dry_run:
+            logger.info(f"[linkedin][follow:dry-run] 회사 팔로우 대상 likes={likes} | {company}")
+            return "followed"
+
+        await btn.click(timeout=5000)
+        for _ in range(12):
+            await page.wait_for_timeout(400)
+            if await btn.get_attribute("aria-pressed") == "true":
+                logger.info(f"[linkedin][follow] 회사 팔로우 완료 likes={likes} | {company}")
+                return "followed"
+
+        logger.warning(f"[linkedin][follow] 클릭했으나 상태 미확인 | {company}")
+        return "failed"
 
     async def _follow_threads(self, page, handle: str, likes) -> str:
         """Threads 전용 — 텍스트 정확 일치 + '유일할 때만' 클릭.

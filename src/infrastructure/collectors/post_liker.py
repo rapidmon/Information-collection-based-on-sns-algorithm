@@ -16,6 +16,8 @@ import asyncio
 import logging
 import random
 
+from playwright.async_api import Locator
+
 from src.domain.entities import Post
 from src.infrastructure.collectors.cdp import cdp_connection, minimize_window
 from src.infrastructure.config.settings import LikeConfig
@@ -46,6 +48,8 @@ _LIKE_SELECTORS = {
     },
 }
 
+_THREADS_MAIN_POST = '[data-pressable-container="true"]'
+
 
 def _is_likeable_url(source: str, url: str) -> bool:
     """추천은 개별 게시물 페이지에서만 가능하다.
@@ -60,7 +64,7 @@ def _is_likeable_url(source: str, url: str) -> bool:
     return url.startswith(("http://", "https://"))
 
 
-async def _get_like_state(page, source: str):
+async def _get_like_state(page, source: str) -> tuple[str, Locator | None]:
     """현재 페이지 메인 게시물의 좋아요 상태를 HTML 태그로 판정.
 
     반환: (state, button) — state ∈ {'liked', 'not_liked', 'not_found'}
@@ -70,20 +74,22 @@ async def _get_like_state(page, source: str):
     if not sels:
         return ("not_found", None)
 
-    # 1) 이미 좋아요된 상태인지 먼저 확인 (상태 태그로 명확히)
-    liked_el = await page.query_selector(sels["liked"])
-    if liked_el:
+    # Threads 게시물 상세에는 답글의 좋아요 버튼도 함께 렌더된다. 첫 번째
+    # pressable container가 URL이 가리키는 메인 게시물이므로 그 안으로 한정한다.
+    scope = page.locator(_THREADS_MAIN_POST).first if source == "threads" else page
+
+    # ElementHandle은 Threads의 React 재렌더 때 분리된다. Locator는 클릭 시점에
+    # DOM을 다시 찾아 주므로 상태 판정부터 Locator를 유지한다.
+    liked_el = scope.locator(sels["liked"]).first
+    if await liked_el.count():
         return ("liked", liked_el)
 
     # 2) 미좋아요(누를 수 있는) 버튼 확인
-    not_liked_el = await page.query_selector(sels["not_liked"])
-    if not_liked_el:
+    not_liked_el = scope.locator(sels["not_liked"]).first
+    if await not_liked_el.count():
         if source == "threads":
             # svg → 실제 클릭 대상(버튼)으로 승격
-            handle = await not_liked_el.evaluate_handle(
-                "el => el.closest('div[role=\"button\"], a[role=\"button\"], button')"
-            )
-            not_liked_el = handle.as_element()
+            not_liked_el = not_liked_el.locator('xpath=ancestor::*[@role="button"][1]')
         return ("not_liked", not_liked_el)
 
     # 3) 둘 다 없음 = 아직 렌더 안 됐거나 셀렉터 불일치
@@ -141,6 +147,18 @@ class CdpPostLiker:
             elapsed += step
         return state, btn
 
+    async def _wait_for_liked(self, page, source: str, timeout_ms: int = 6000) -> bool:
+        """클릭 후 UI 상태가 실제 좋아요로 바뀌었는지 확인한다."""
+        elapsed = 0
+        step = 400
+        while elapsed < timeout_ms:
+            state, _ = await _get_like_state(page, source)
+            if state == "liked":
+                return True
+            await page.wait_for_timeout(step)
+            elapsed += step
+        return False
+
     async def _like_one(self, page, source: str, post: Post) -> bool:
         snippet = (post.summary or post.content_text or "")[:60].replace("\n", " ")
         # 개별 게시물 URL이 아니면(프로필/회사 폴백 등) goto 타임아웃만 나므로 깔끔히 스킵
@@ -173,8 +191,12 @@ class CdpPostLiker:
                 )
                 return True
 
-            await btn.scroll_into_view_if_needed(timeout=3000)
-            await btn.click(timeout=3000)
+            await btn.click(timeout=5000)
+            if not await self._wait_for_liked(page, source):
+                logger.warning(
+                    f"[{source}][like] 클릭했으나 좋아요 상태 미확인: {post.url} | {snippet}"
+                )
+                return False
             logger.info(
                 f"[{source}][like] 좋아요 완료 score={post.importance_score} | {snippet}"
             )

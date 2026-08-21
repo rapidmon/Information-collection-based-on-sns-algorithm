@@ -410,10 +410,11 @@ class PostRepositorySQLite:
               AND importance_score >= ?
               AND liked_at IS NULL
               AND url IS NOT NULL AND url != ''
+              AND (? != 'linkedin' OR url LIKE '%/feed/update/urn:li:%')
             ORDER BY importance_score DESC, collected_at DESC
             LIMIT ?
             """,
-            (source, min_importance, limit),
+            (source, min_importance, source, limit),
         )
         return [_post_from_row(row) for row in cursor.fetchall()]
 
@@ -452,6 +453,7 @@ class PostRepositorySQLite:
             WHERE p.source = ?
               AND p.liked_at IS NOT NULL
               AND p.author_url IS NOT NULL AND p.author_url != ''
+              AND (? != 'linkedin' OR p.author_url LIKE '%linkedin.com/company/%')
               AND (f.author_url IS NULL
                    OR (f.status = 'failed' AND f.attempts < ?))
             GROUP BY p.author_url
@@ -459,7 +461,7 @@ class PostRepositorySQLite:
             ORDER BY like_count DESC
             LIMIT ?
             """,
-            (source, max_attempts, min_likes, limit),
+            (source, source, max_attempts, min_likes, limit),
         )
         return [
             {

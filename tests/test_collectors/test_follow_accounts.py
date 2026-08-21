@@ -175,17 +175,30 @@ def test_threads_handle_strips_at(repo):
     assert got[0]["screen_name"] == "johnbrolins"
 
 
-async def test_linkedin_is_not_followed():
-    """LinkedIn은 대상 본인 버튼과 추천 계정 버튼의 라벨 규칙이 반대라 미지원.
-
-    지원하면 정확히 엉뚱한 계정(Anthropic·Google…)만 골라 팔로우하게 된다.
-    """
-    from src.infrastructure.collectors.account_follower import SUPPORTED, CdpAccountFollower
-
-    assert "linkedin" not in SUPPORTED
-
-    follower = CdpAccountFollower(FollowConfig({"enabled": True}))
-    got = await follower.follow_accounts(
-        "linkedin", [{"author_url": "https://www.linkedin.com/in/x/", "screen_name": "x"}]
+def test_linkedin_candidates_only_include_companies(repo):
+    _add_liked(
+        repo, "https://www.linkedin.com/company/openai/", 5, source="linkedin"
     )
-    assert got == []
+    _add_liked(
+        repo, "https://www.linkedin.com/in/example/", 6, source="linkedin"
+    )
+
+    got = repo.get_follow_candidates(source="linkedin", min_likes=5, limit=10)
+
+    assert [candidate["screen_name"] for candidate in got] == ["openai"]
+
+
+def test_linkedin_company_follow_uses_target_top_card_only():
+    from src.infrastructure.collectors.account_follower import (
+        SUPPORTED,
+        _LINKEDIN_COMPANY_FOLLOW,
+        _linkedin_company_url,
+    )
+
+    assert "linkedin" in SUPPORTED
+    assert "org-company-follow-button" in _LINKEDIN_COMPANY_FOLLOW
+    assert "org-top-card-primary-actions__action" in _LINKEDIN_COMPANY_FOLLOW
+    assert _linkedin_company_url("https://linkedin.com/company/openai/?trk=x") == (
+        "https://www.linkedin.com/company/openai/"
+    )
+    assert _linkedin_company_url("https://www.linkedin.com/in/example/") == ""
